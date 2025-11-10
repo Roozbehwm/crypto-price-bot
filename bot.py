@@ -16,7 +16,10 @@ import requests
 import schedule
 
 # --- تنظیمات ---
-from config import TOKEN
+import os
+TOKEN = os.environ.get('TOKEN')
+if not TOKEN:
+    raise ValueError("TOKEN not found in environment variables!")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -610,3 +613,4 @@ if __name__ == '__main__':
         webhook_url=WEBHOOK_URL,
         flask_app=flask_app
     )
+
