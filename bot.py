@@ -11,8 +11,9 @@ from telegram.ext import (
 )
 import os
 
-# --- تنظیمات ---
-from config import TOKEN, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+# --- تنظیمات از Environment Variables ---
+TOKEN = os.environ["TOKEN"]
+UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -579,7 +580,7 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(select_popular, pattern='^select_pop_'))
     app.add_handler(CallbackQueryHandler(search_coin_start, pattern='^search_coin$'))
     app.add_handler(CallbackQueryHandler(cancel, pattern='^cancel$'))
-    app.add_handler(CallbackQueryHandler(select_search, pattern='^select_search\|'))
+    app.add_handler(CallbackQueryHandler(select_search, pattern=r'^select_search\|'))
     app.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
     app.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
     app.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
@@ -603,3 +604,4 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
