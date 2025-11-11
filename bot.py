@@ -34,14 +34,16 @@ def redis_get(key):
 
 def redis_set(key, value):
     try:
-        url = f"{UPSTASH_REDIS_REST_URL}/set/{key}"
-        headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}", "Content-Type": "application/json"}
-        data = json.dumps(value, ensure_ascii=False)
-        response = requests.post(url, headers=headers, json={"value": data}, timeout=10)
-        return response.status_code == 200
-    except Exception as e:
-        logger.error(f"Redis SET error: {e}")
-        return False
+    r = redis.from_url(
+        UPSTASH_REDIS_URL,
+        decode_responses=True,
+        ssl_cert_reqs=None  # این مهمه برای Upstash
+    )
+    r.ping()
+    logger.info("Redis متصل شد!")
+except Exception as e:
+    logger.error(f"Redis error: {e}")
+    raise
 
 # تست اولیه
 if not redis_set("test_key", "connected"):
@@ -604,4 +606,5 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
