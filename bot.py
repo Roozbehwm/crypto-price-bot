@@ -16,12 +16,17 @@ from telegram.ext import (
 TOKEN = os.environ["TOKEN"]
 UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
 
+# --- لاگ ---
+import logging  # <--- حتماً باشه!
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # --- دیباگ ---
 logger.info(f"UPSTASH_REDIS_URL: {UPSTASH_REDIS_URL}")
 if not UPSTASH_REDIS_URL.startswith("rediss://"):
     logger.error("UPSTASH_REDIS_URL باید با rediss:// شروع بشه!")
     raise ValueError("Invalid Redis URL scheme")
-
+    
 # --- لاگ ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -582,5 +587,6 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
 
