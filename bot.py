@@ -564,7 +564,7 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(select_search, pattern=r'^select_search\|'))
     app.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
     app.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
-    app.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
+    app.add_handler(CallbackHandler(set_time, pattern='^time_'))
     app.add_handler(CallbackQueryHandler(save_time, pattern='settime_'))
     app.add_handler(CallbackQueryHandler(set_alert, pattern='^alert_'))
     app.add_handler(CallbackQueryHandler(select_alert_op, pattern='^alertop_'))
@@ -577,26 +577,34 @@ if __name__ == '__main__':
     # شروع چک قیمت
     app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
-    # --- Health Check روی همون پورت اصلی (10000) ---
-    from aiohttp import web
+    # --- Flask برای Health Check (روی پورت اصلی) ---
+    from flask import Flask
+    import threading
 
-    async def health_check(request):
+    flask_app = Flask(__name__)
+
+    @flask_app.route('/health', methods=['GET'])
+    def health_check():
         try:
-            r.ping()  # چک Redis
-            return web.Response(text="OK", status=200)
+            r.ping()
+            return 'OK', 200
         except Exception as e:
-            return web.Response(text=f"Redis Down: {str(e)}", status=500)
+            return f'Redis Down: {str(e)}', 500
 
-    # اضافه کردن /health به وب‌هوک اصلی
-    app.updater.webhook_app.router.add_get('/health', health_check)
-    logger.info("Health check added to main webhook on /health")
-
-    # --- تنظیمات وب‌هوک ---
+    # --- تنظیمات وب‌هوک تلگرام ---
     PORT = int(os.environ.get("PORT", 10000))
     DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").lstrip("https://").lstrip("http://")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
     logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
 
+    # اجرای Flask در ترد جدا
+    def run_flask():
+        flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+
+    threading.Thread(target=run_flask, daemon=True).start()
+    logger.info("Flask health server running on /health")
+
+    # اجرای وب‌هوک تلگرام
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
