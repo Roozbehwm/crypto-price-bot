@@ -580,7 +580,7 @@ if __name__ == '__main__':
     app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
     PORT = int(os.environ.get("PORT", 10000))
-    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost")
+    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").replace("https://", "").replace("http://", "")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
 
     logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
@@ -590,6 +590,7 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
 
 
