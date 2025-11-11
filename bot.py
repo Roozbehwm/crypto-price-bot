@@ -567,7 +567,7 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
     app.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
     app.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
-    app.add_handler(CallbackQueryHandler(save_time, pattern='^settime_'))
+    app.add_handler(CallbackQueryHandler(save_time, pattern='settime_'))
     app.add_handler(CallbackQueryHandler(set_alert, pattern='^alert_'))
     app.add_handler(CallbackQueryHandler(select_alert_op, pattern='^alertop_'))
     app.add_handler(CallbackQueryHandler(clear_alert, pattern='^clearalert_'))
@@ -580,7 +580,7 @@ if __name__ == '__main__':
     app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
     PORT = int(os.environ.get("PORT", 10000))
-    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").replace("https://", "").replace("http://", "")
+    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").lstrip("https://").lstrip("http://")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
 
     logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
