@@ -550,9 +550,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- post_init ---
 
-# --- اضافه کن به انتهای bot.py (قبل از if __name__ == '__main__') ---
 
-from flask import request
+# --- اجرا ---
+if __name__ == '__main__':
+    app = Application.builder().token(TOKEN).build()
+
+    from flask import request
 
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -562,11 +565,6 @@ def health_check():
     except:
         return 'Redis Down', 500
 
-
-
-# --- اجرا ---
-if __name__ == '__main__':
-    app = Application.builder().token(TOKEN).build()
 
     # هندلرها
     app.add_handler(CommandHandler("start", start))
@@ -602,6 +600,7 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
 
 
