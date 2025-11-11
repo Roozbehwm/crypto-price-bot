@@ -33,16 +33,17 @@ def redis_get(key):
         return []
 
 def redis_set(key, value):
-    try:
+  # --- اتصال به Redis ---
+try:
     r = redis.from_url(
         UPSTASH_REDIS_URL,
         decode_responses=True,
-        ssl_cert_reqs=None  # این مهمه برای Upstash
+        ssl_cert_reqs=None
     )
     r.ping()
-    logger.info("Redis متصل شد!")
+    logger.info("Redis متصل شد! (rediss)")
 except Exception as e:
-    logger.error(f"Redis error: {e}")
+    logger.error(f"خطا در اتصال به Redis: {e}")
     raise
 
 # تست اولیه
@@ -606,5 +607,6 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
 
