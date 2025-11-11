@@ -5,7 +5,7 @@ import json
 import time
 import asyncio
 import requests
-import redis  # <--- حتماً در requirements.txt باشه
+import redis
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
@@ -173,6 +173,11 @@ TIME_OPTIONS = [
     (8 * 60, "۸ ساعت"), (12 * 60, "۱۲ ساعت"), (24 * 60, "۲۴ ساعت"),
     (36 * 60, "۳۶ ساعت"), (7 * 24 * 60, "هفته‌ای یکبار")
 ]
+
+# --- اجرای چک قیمت ---
+async def start_price_checker(app):
+    await asyncio.sleep(10)  # صبر برای راه‌اندازی
+    asyncio.create_task(check_prices(app))
 
 # --- منو ---
 def main_menu():
@@ -544,17 +549,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await search_coin(update, context)
 
 # --- post_init ---
-async def post_init(application: Application):
-    await application.bot.set_my_commands([
-        BotCommand("start", "شروع ربات و منوی اصلی"),
-        BotCommand("menu", "نمایش منوی اصلی")
-    ])
-    application.create_task(check_prices(application))
+
+    # application.create_task(check_prices(application))
 
 # --- اجرا ---
 if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
-    app.post_init = post_init
 
     # هندلرها
     app.add_handler(CommandHandler("start", start))
@@ -576,6 +576,9 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
+    # شروع چک قیمت
+    app.job_queue.run_once(start_price_checker, 1)
+
     PORT = int(os.environ.get("PORT", 10000))
     DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "your-service.onrender.com")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
@@ -587,6 +590,7 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
 
 
