@@ -1,56 +1,72 @@
 # bot.py
 import logging
 import json
-import os
 import time
-import threading
 import asyncio
-from flask import Flask
-
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
-import requests
-import schedule
+import os
 
 # --- تنظیمات ---
-import os
-TOKEN = os.environ.get('TOKEN')
-if not TOKEN:
-    raise ValueError("TOKEN not found in environment variables!")
+from config import TOKEN, UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# --- تست اتصال Redis ---
+def redis_get(key):
+    try:
+        url = f"{UPSTASH_REDIS_REST_URL}/get/{key}"
+        headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return json.loads(data['result']) if data['result'] else []
+        return []
+    except Exception as e:
+        logger.error(f"Redis GET error: {e}")
+        return []
+
+def redis_set(key, value):
+    try:
+        url = f"{UPSTASH_REDIS_REST_URL}/set/{key}"
+        headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}", "Content-Type": "application/json"}
+        data = json.dumps(value, ensure_ascii=False)
+        response = requests.post(url, headers=headers, json={"value": data}, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        logger.error(f"Redis SET error: {e}")
+        return False
+
+# تست اولیه
+if not redis_set("test_key", "connected"):
+    logger.error("Redis connection failed!")
+    raise Exception("Redis not connected")
+
+logger.info("Redis REST connected successfully")
+
 # --- ایموجی‌ها ---
-TICK = "Checkmark"
-CROSS = "Cross"
-COIN = "Coin"
-EDIT = "Pencil"
-ALERT = "Bell"
-DELETE = "Trash"
-BACK = "Back"
-SEARCH = "Magnifying Glass"
-CANCEL = "Cancel"
+TICK = "✅"
+CROSS = "❌"
+COIN = "💰"
+EDIT = "✏️"
+ALERT = "🔔"
+DELETE = "🗑️"
+BACK = "🔙"
+SEARCH = "🔍"
+CANCEL = "❌"
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
-    'BTC': ('bitcoin', 'Bitcoin'),
-    'ETH': ('ethereum', 'Ethereum'),
-    'BNB': ('binancecoin', 'BNB'),
-    'SOL': ('solana', 'Solana'),
-    'XRP': ('ripple', 'XRP'),
-    'TON': ('the-open-network', 'Toncoin'),
-    'FET': ('fetch-ai', 'Fetch.AI'),
-    'SUI': ('sui', 'Sui'),
-    'CAKE': ('pancakeswap', 'PancakeSwap'),
-    'VET': ('vechain', 'VeChain'),
-    'AAVE': ('aave', 'Aave'),
-    'TAO': ('bittensor', 'Bittensor'),
-    'LINK': ('chainlink', 'Chainlink'),
-    'GALA': ('gala', 'Gala')
+    'BTC': ('bitcoin', 'Bitcoin'), 'ETH': ('ethereum', 'Ethereum'), 'BNB': ('binancecoin', 'BNB'),
+    'SOL': ('solana', 'Solana'), 'XRP': ('ripple', 'XRP'), 'TON': ('the-open-network', 'Toncoin'),
+    'FET': ('fetch-ai', 'Fetch.AI'), 'SUI': ('sui', 'Sui'), 'CAKE': ('pancakeswap', 'PancakeSwap'),
+    'VET': ('vechain', 'VeChain'), 'AAVE': ('aave', 'Aave'), 'TAO': ('bittensor', 'Bittensor'),
+    'LINK': ('chainlink', 'Chainlink'), 'GALA': ('gala', 'Gala')
 }
 
 # --- همه ارزها ---
@@ -85,48 +101,16 @@ ALL_COINS = {
 
 MAX_COINS = 20
 TIME_OPTIONS = [
-    (8 * 60, "۸ ساعت"),
-    (12 * 60, "۱۲ ساعت"),
-    (24 * 60, "۲۴ ساعت"),
-    (36 * 60, "۳۶ ساعت"),
-    (7 * 24 * 60, "هفته‌ای یکبار")
+    (8 * 60, "۸ ساعت"), (12 * 60, "۱۲ ساعت"), (24 * 60, "۲۴ ساعت"),
+    (36 * 60, "۳۶ ساعت"), (7 * 24 * 60, "هفته‌ای یکبار")
 ]
 
-# --- ذخیره دائمی ---
-DATA_FILE = 'user_data.json'
-user_data = {}
+# --- توابع Redis ---
+def get_user_data(user_id):
+    return redis_get(f"user:{user_id}")
 
-def load_data():
-    global user_data
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                user_data = json.load(f)
-            for uid in user_data:
-                for item in user_data[uid]:
-                    if 'last_sent' not in item or item['last_sent'] == 0:
-                        item['last_sent'] = time.time() - 900
-        except Exception as e:
-            logger.error(f"Load error: {e}")
-            user_data = {}
-    else:
-        user_data = {}
-
-def save_data():
-    try:
-        with open(DATA_FILE, 'w', encoding='utf-8') as f:
-            json.dump(user_data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Save error: {e}")
-
-load_data()
-
-# --- Flask برای /ping ---
-flask_app = Flask(__name__)
-
-@flask_app.route('/ping')
-def ping():
-    return "Bot is alive!", 200
+def set_user_data(user_id, data):
+    return redis_set(f"user:{user_id}", data)
 
 # --- قیمت ---
 def get_price(cg_id):
@@ -138,44 +122,46 @@ def get_price(cg_id):
         logger.error(f"Price error: {e}")
         return None
 
-# --- چک قیمت ---
-def check_prices():
-    async def send_message(user_id, text):
+# --- چک قیمت دوره‌ای ---
+async def check_prices(app):
+    while True:
         try:
-            await app.bot.send_message(chat_id=user_id, text=text, parse_mode='Markdown')
-        except Exception as e:
-            logger.error(f"Send error to {user_id}: {e}")
-
-    async def run_checks():
-        tasks = []
-        current_time = time.time()
-
-        for user_id, settings in list(user_data.items()):
-            for item in settings[:]:
-                price = get_price(item['cg_id'])
-                if price is None:
+            current_time = time.time()
+            # لیست کلیدها رو از Redis بگیر (محدود به 100 کاربر اخیر، برای بهینه‌سازی)
+            keys_response = requests.get(f"{UPSTASH_REDIS_REST_URL}/keys/user:*", headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"})
+            if keys_response.status_code != 200:
+                await asyncio.sleep(60)
+                continue
+            keys = keys_response.json().get('result', [])
+            
+            for key in keys[:100]:  # محدود برای سرعت
+                user_id = int(key.split(":")[1])
+                settings = get_user_data(user_id)
+                if not settings:
                     continue
 
-                last_sent = item.get('last_sent', 0)
-                period_seconds = item['period'] * 60
-                time_passed = current_time - last_sent >= period_seconds
+                for item in settings[:]:
+                    price = get_price(item['cg_id'])
+                    if price is None:
+                        continue
 
-                if 'alert' not in item:
-                    if time_passed:
+                    last_sent = item.get('last_sent', 0)
+                    period_seconds = item['period'] * 60
+                    if current_time - last_sent < period_seconds:
+                        continue
+
+                    if 'alert' not in item:
                         message = (
                             f"{COIN} قیمت لحظه‌ای\n\n"
                             f"**نام ارز:** `{item['symbol']}`\n"
                             f"**قیمت:** `${price:,.2f}`"
                         )
-                        tasks.append(send_message(user_id, message))
-                        item['last_sent'] = current_time
-
-                else:
-                    op = item['alert']['op']
-                    target = item['alert']['price']
-                    condition_met = (op == '>=' and price >= target) or (op == '<=' and price <= target)
-
-                    if condition_met and time_passed:
+                    else:
+                        op = item['alert']['op']
+                        target = item['alert']['price']
+                        condition = (op == '>=' and price >= target) or (op == '<=' and price <= target)
+                        if not condition:
+                            continue
                         op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
                         message = (
                             f"{ALERT} هشدار قیمت!\n\n"
@@ -183,20 +169,19 @@ def check_prices():
                             f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
                             f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
                         )
-                        tasks.append(send_message(user_id, message))
+
+                    try:
+                        await app.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
                         item['last_sent'] = current_time
+                    except Exception as send_e:
+                        logger.error(f"Send message error to {user_id}: {send_e}")
 
-        if tasks:
-            await asyncio.gather(*tasks)
+                set_user_data(user_id, settings)
 
-    asyncio.run(run_checks())
-
-# --- scheduler ---
-def run_scheduler():
-    schedule.every(1).minutes.do(check_prices)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+        except Exception as e:
+            logger.error(f"Check prices error: {e}")
+        
+        await asyncio.sleep(60)  # هر دقیقه
 
 # --- منو ---
 def main_menu():
@@ -209,9 +194,8 @@ def main_menu():
 # --- /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in user_data:
-        user_data[user_id] = []
-        save_data()
+    if get_user_data(user_id) == []:
+        set_user_data(user_id, [])
     context.user_data.clear()
 
     await update.message.reply_text(
@@ -273,10 +257,10 @@ async def search_coin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def search_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    query = update.message.text.strip().lower()
+    query_text = update.message.text.strip().lower()
     results = []
     for symbol, cg_id in ALL_COINS.items():
-        if query in symbol.lower() or query in cg_id.lower():
+        if query_text in symbol.lower() or query_text in cg_id.lower():
             results.append((symbol, cg_id))
         if len(results) >= 10:
             break
@@ -288,7 +272,7 @@ async def search_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for symbol, cg_id in results:
         keyboard.append([InlineKeyboardButton(f"{symbol}", callback_data=f"select_search|{cg_id}|{symbol}")])
     keyboard.append([InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')])
-    await update.message.reply_text(f"نتایج برای `{query}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+    await update.message.reply_text(f"نتایج برای `{query_text}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     context.user_data['state'] = 'awaiting_selection'
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,10 +294,9 @@ async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
-    if user_id not in user_data:
-        user_data[user_id] = []
+    settings = get_user_data(user_id)
 
-    if any(c['cg_id'] == cg_id for c in user_data[user_id]):
+    if any(c['cg_id'] == cg_id for c in settings):
         price = get_price(cg_id)
         if price:
             await app.bot.send_message(
@@ -328,27 +311,21 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
         return
 
-    if len(user_data[user_id]) >= MAX_COINS:
+    if len(settings) >= MAX_COINS:
+        text = f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\nاول یکی رو با {DELETE} پاک کن."
         if hasattr(query_or_msg, 'edit_message_text'):
-            await query_or_msg.edit_message_text(
-                f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\n"
-                f"اول یکی رو با {DELETE} پاک کن، بعد اضافه کن.",
-                reply_markup=main_menu()
-            )
+            await query_or_msg.edit_message_text(text, reply_markup=main_menu(), parse_mode='Markdown')
         else:
-            await query_or_msg.reply_text(
-                f"{CROSS} **حداکثر {MAX_COINS} ارز!**\nاول یکی رو پاک کن.",
-                reply_markup=main_menu()
-            )
+            await query_or_msg.reply_text(text, reply_markup=main_menu(), parse_mode='Markdown')
         return
 
-    user_data[user_id].append({
+    settings.append({
         'symbol': symbol,
         'cg_id': cg_id,
         'period': 15,
         'last_sent': time.time()
     })
-    save_data()
+    set_user_data(user_id, settings)
 
     confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
     if hasattr(query_or_msg, 'edit_message_text'):
@@ -372,11 +349,12 @@ async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
     context.user_data.clear()
-    if user_id not in user_data or not user_data[user_id]:
+    settings = get_user_data(user_id)
+    if not settings:
         await query.edit_message_text(f"{CROSS} هیچ ارزی نداری! از منو اضافه کن.", reply_markup=main_menu())
         return
     keyboard = []
-    for item in user_data[user_id]:
+    for item in settings:
         symbol = item['symbol']
         cg_id = item['cg_id']
         mins = item['period']
@@ -390,7 +368,7 @@ async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton(f"{DELETE}", callback_data=f"remove_{cg_id}")
         ])
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data='back')])
-    await query.edit_message_text(f"{SEARCH} ارزهایت ({len(user_data[user_id])}/{MAX_COINS}):", reply_markup=InlineKeyboardMarkup(keyboard))
+    await query.edit_message_text(f"{SEARCH} ارزهایت ({len(settings)}/{MAX_COINS}):", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # --- ویرایش ---
 async def edit_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -398,7 +376,8 @@ async def edit_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
     cg_id = query.data.split('_')[1]
-    item = next((i for i in user_data.get(user_id, []) if i['cg_id'] == cg_id), None)
+    settings = get_user_data(user_id)
+    item = next((i for i in settings if i['cg_id'] == cg_id), None)
     if not item:
         await query.edit_message_text(f"{CROSS} خطا: ارز پیدا نشد!", reply_markup=main_menu())
         return
@@ -406,7 +385,7 @@ async def edit_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(f"{EDIT} تغییر زمان", callback_data=f"time_{cg_id}")],
         [InlineKeyboardButton(f"{ALERT} تنظیم هشدار", callback_data=f"alert_{cg_id}")],
-        [InlineKeyboardButton(f"{CROSS} حذف هشدار", callback_data=f"clearalert_{cg_id}")],
+        [InlineKeyboardButton(f"{CROSS} حذف هشدار", callback_data=f"clearalert_{cg_id}") if 'alert' in item else InlineKeyboardButton(" ", callback_data='none')],
         [InlineKeyboardButton(f"{BACK} برگشت", callback_data='list_coins')]
     ]
     await query.edit_message_text(f"{EDIT} ویرایش `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -416,7 +395,8 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     cg_id = query.data.split('_')[1]
-    item = next((i for i in user_data.get(query.from_user.id, []) if i['cg_id'] == cg_id), None)
+    settings = get_user_data(query.from_user.id)
+    item = next((i for i in settings if i['cg_id'] == cg_id), None)
     symbol = item['symbol'] if item else "؟"
     keyboard = []
     for mins, label in TIME_OPTIONS:
@@ -424,19 +404,22 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f"edit_{cg_id}")])
     await query.edit_message_text(f"{EDIT} زمان `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-# --- ذخیره زمان ---
 async def save_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    _, cg_id, mins = query.data.split('_')
-    mins = int(mins)
-    for item in user_data[user_id]:
-        if item['cg_id'] == cg_id:
-            item['period'] = mins
-            item['last_sent'] = time.time()
+    parts = query.data.split('_')
+    cg_id = parts[1]
+    mins = int(parts[2])
+    settings = get_user_data(user_id)
+    item = None
+    for i in settings:
+        if i['cg_id'] == cg_id:
+            i['period'] = mins
+            i['last_sent'] = time.time()
+            item = i
             break
-    save_data()
+    set_user_data(user_id, settings)
     time_label = next((t[1] for t in TIME_OPTIONS if t[0] == mins), f"هر {mins} دقیقه")
     await query.edit_message_text(f"{TICK} زمان `{item['symbol']}` به **{time_label}** تغییر کرد.", reply_markup=main_menu(), parse_mode='Markdown')
 
@@ -445,7 +428,8 @@ async def set_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     cg_id = query.data.split('_')[1]
-    item = next((i for i in user_data.get(query.from_user.id, []) if i['cg_id'] == cg_id), None)
+    settings = get_user_data(query.from_user.id)
+    item = next((i for i in settings if i['cg_id'] == cg_id), None)
     symbol = item['symbol'] if item else "؟"
     keyboard = [
         [InlineKeyboardButton("بیشتر از (≥)", callback_data=f"alertop_{cg_id}_>=")],
@@ -454,12 +438,13 @@ async def set_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await query.edit_message_text(f"{ALERT} هشدار `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
-# --- انتخاب عملگر ---
 async def select_alert_op(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    _, cg_id, op = query.data.split('_')
+    parts = query.data.split('_')
+    cg_id = parts[1]
+    op = parts[2]
     context.user_data['temp_alert'] = {'cg_id': cg_id, 'op': op}
     context.user_data['state'] = 'alert_price'
     keyboard = [[InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]]
@@ -471,7 +456,6 @@ async def select_alert_op(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# --- ذخیره هشدار ---
 async def save_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip().replace(',', '')
@@ -479,53 +463,61 @@ async def save_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         price = float(text)
     except ValueError:
         keyboard = [[InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]]
-        await update.message.reply_text(f"{CROSS} فقط عدد معتبر وارد کنید (مثلاً 10000 یا 10000.50)!",
-                                        reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(f"{CROSS} فقط عدد معتبر وارد کنید (مثلاً 10000 یا 10000.50)!", reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     temp = context.user_data.get('temp_alert')
     if not temp:
-        await update.message.reply_text(f"{CROSS} خطا!")
+        await update.message.reply_text(f"{CROSS} خطا! دوباره امتحان کن.", reply_markup=main_menu())
         return
 
     cg_id = temp['cg_id']
     op = temp['op']
     op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
-    for item in user_data[user_id]:
-        if item['cg_id'] == cg_id:
-            item['alert'] = {'op': op, 'price': price}
-            symbol = item['symbol']
+    settings = get_user_data(user_id)
+    item = None
+    for i in settings:
+        if i['cg_id'] == cg_id:
+            i['alert'] = {'op': op, 'price': price}
+            item = i
             break
-    save_data()
+    set_user_data(user_id, settings)
     context.user_data.clear()
     await update.message.reply_text(
-        f"{TICK} هشدار `{symbol}` تنظیم شد:\n{op_text} **${price:,.2f}**",
+        f"{TICK} هشدار `{item['symbol']}` تنظیم شد:\n{op_text} **${price:,.2f}**",
         reply_markup=main_menu(),
         parse_mode='Markdown'
     )
 
-# --- حذف هشدار ---
 async def clear_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     cg_id = query.data.split('_')[1]
-    for item in user_data[user_id]:
-        if item['cg_id'] == cg_id and 'alert' in item:
-            del item['alert']
+    settings = get_user_data(user_id)
+    item = None
+    for i in settings:
+        if i['cg_id'] == cg_id and 'alert' in i:
+            del i['alert']
+            item = i
             break
-    save_data()
+    set_user_data(user_id, settings)
     await query.edit_message_text(f"{CROSS} هشدار `{item['symbol']}` حذف شد.", reply_markup=main_menu(), parse_mode='Markdown')
 
-# --- حذف ---
 async def remove_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     cg_id = query.data.split('_')[1]
-    removed_symbol = next((c['symbol'] for c in user_data[user_id] if c['cg_id'] == cg_id), "؟")
-    user_data[user_id] = [c for c in user_data[user_id] if c['cg_id'] != cg_id]
-    save_data()
+    settings = get_user_data(user_id)
+    removed_symbol = "؟"
+    new_settings = []
+    for item in settings:
+        if item['cg_id'] == cg_id:
+            removed_symbol = item['symbol']
+        else:
+            new_settings.append(item)
+    set_user_data(user_id, new_settings)
     await query.edit_message_text(f"{DELETE} `{removed_symbol}` حذف شد.", reply_markup=main_menu(), parse_mode='Markdown')
 
 # --- راهنما ---
@@ -567,18 +559,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await search_coin(update, context)
 
 # --- post_init ---
-async def post_init(application: Application) -> None:
-    commands = [
+async def post_init(application: Application):
+    await application.bot.set_my_commands([
         BotCommand("start", "شروع ربات و منوی اصلی"),
         BotCommand("menu", "نمایش منوی اصلی")
-    ]
-    await application.bot.set_my_commands(commands)
+    ])
+    # شروع چک قیمت
+    application.job_queue.run_repeating(check_prices, interval=60, first=10)  # هر 60 ثانیه
 
 # --- اجرا ---
 if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
     app.post_init = post_init
 
+    # هندلرها
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
@@ -598,19 +592,14 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    threading.Thread(target=run_scheduler, daemon=True).start()
-
-    import os
-    PORT = int(os.environ.get('PORT', 8443))
-    DOMAIN = os.environ.get('RAILWAY_STATIC_URL', 'localhost')
+    PORT = int(os.environ.get("PORT", 10000))
+    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "your-service.onrender.com")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
 
-    print(f"ربات در حال اجراست: {WEBHOOK_URL}")
+    logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=TOKEN,
-        webhook_url=WEBHOOK_URL,
-        flask_app=flask_app
+        webhook_url=WEBHOOK_URL
     )
-
