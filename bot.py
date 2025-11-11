@@ -577,10 +577,10 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # شروع چک قیمت
-    app.job_queue.run_once(start_price_checker, 1)
+    app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
     PORT = int(os.environ.get("PORT", 10000))
-    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "your-service.onrender.com")
+    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
 
     logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
@@ -590,6 +590,7 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
 
 
 
