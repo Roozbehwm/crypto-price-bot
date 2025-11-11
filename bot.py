@@ -549,26 +549,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await search_coin(update, context)
 
 
-from aiohttp import web
-import asyncio
-
-async def health_check(request):
-    try:
-        r.ping()  # چک اتصال Redis
-        return web.Response(text="OK", status=200)
-    except Exception as e:
-        return web.Response(text=f"Redis Down: {str(e)}", status=500)
-
-# --- Health Check برای Uptime Robot (با aiohttp) ---
-from aiohttp import web
-
-async def health_check(request):
-    try:
-        r.ping()  # چک Redis
-        return web.Response(text="OK", status=200)
-    except Exception as e:
-        return web.Response(text=f"Redis Down: {str(e)}", status=500)
-
 # --- اجرا ---
 if __name__ == '__main__':
     # ساخت اپلیکیشن تلگرام
@@ -597,33 +577,26 @@ if __name__ == '__main__':
     # شروع چک قیمت
     app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
-    # --- Health Server با aiohttp (روی پورت جدا) ---
+    # --- Health Check روی همون پورت اصلی (10000) ---
     from aiohttp import web
-    import threading
 
     async def health_check(request):
         try:
-            r.ping()
+            r.ping()  # چک Redis
             return web.Response(text="OK", status=200)
         except Exception as e:
             return web.Response(text=f"Redis Down: {str(e)}", status=500)
 
-    def start_health_server():
-        health_app = web.Application()
-        health_app.router.add_get('/health', health_check)
-        web.run_app(health_app, host='0.0.0.0', port=8080)  # پورت جدا
+    # اضافه کردن /health به وب‌هوک اصلی
+    app.updater.webhook_app.router.add_get('/health', health_check)
+    logger.info("Health check added to main webhook on /health")
 
-    # اجرای health server در ترد جدا
-    threading.Thread(target=start_health_server, daemon=True).start()
-    logger.info("Health server running on port 8080 (/health)")
-
-    # --- تنظیمات وب‌هوک تلگرام ---
+    # --- تنظیمات وب‌هوک ---
     PORT = int(os.environ.get("PORT", 10000))
     DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").lstrip("https://").lstrip("http://")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
     logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
 
-    # اجرای وب‌هوک تلگرام (روی پورت اصلی)
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
