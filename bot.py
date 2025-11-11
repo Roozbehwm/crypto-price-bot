@@ -108,15 +108,15 @@ async def check_prices(app):
         await asyncio.sleep(60)
 
 # --- ایموجی‌ها ---
-TICK = "Checkmark"
-CROSS = "Cross"
-COIN = "Coin"
-EDIT = "Pencil"
-ALERT = "Bell"
-DELETE = "Trash"
-BACK = "Back"
-SEARCH = "Magnifying Glass"
-CANCEL = "Cancel"
+TICK = "✅"
+CROSS = "❌"
+COIN = "💰"
+EDIT = "✏️"
+ALERT = "🔔"
+DELETE = "🗑️"
+BACK = "🔙"
+SEARCH = "🔍"
+CANCEL = "❌"
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
@@ -576,3 +576,4 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
+
