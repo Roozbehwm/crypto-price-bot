@@ -548,23 +548,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await search_coin(update, context)
 
-# --- post_init ---
 
+from aiohttp import web
+import asyncio
+
+async def health_check(request):
+    try:
+        r.ping()  # چک اتصال Redis
+        return web.Response(text="OK", status=200)
+    except Exception as e:
+        return web.Response(text=f"Redis Down: {str(e)}", status=500)
+
+# ایجاد وب‌سرور جدا برای /health
+health_app = web.Application()
+health_app.router.add_get('/health', health_check)
+
+# تابع اجرای سرور در پس‌زمینه
+async def run_health_server():
+    runner = web.AppRunner(health_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', int(os.environ.get('PORT', 10000)))
+    await site.start()
+    logger.info("Health server running on /health")
 
 # --- اجرا ---
 if __name__ == '__main__':
+    # ساخت اپلیکیشن تلگرام
     app = Application.builder().token(TOKEN).build()
-
-    from flask import request
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    try:
-        r.ping()
-        return 'OK', 200
-    except:
-        return 'Redis Down', 500
-
 
     # هندلرها
     app.add_handler(CommandHandler("start", start))
@@ -589,11 +599,16 @@ def health_check():
     # شروع چک قیمت
     app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
+    # --- اجرای health server در پس‌زمینه ---
+    asyncio.create_task(run_health_server())
+
+    # --- تنظیمات وب‌هوک ---
     PORT = int(os.environ.get("PORT", 10000))
     DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").lstrip("https://").lstrip("http://")
     WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
-
     logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
+
+    # اجرای وب‌هوک تلگرام
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
