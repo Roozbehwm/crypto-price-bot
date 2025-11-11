@@ -550,7 +550,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- post_init ---
 
-    # application.create_task(check_prices(application))
+# --- اضافه کن به انتهای bot.py (قبل از if __name__ == '__main__') ---
+
+from flask import request
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    try:
+        r.ping()
+        return 'OK', 200
+    except:
+        return 'Redis Down', 500
+
+
 
 # --- اجرا ---
 if __name__ == '__main__':
@@ -590,7 +602,6 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
-
 
 
 
