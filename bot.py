@@ -1,68 +1,122 @@
-# bot.py
+# bot.py - نسخه نهایی برای Render + Upstash (rediss://)
+import os
 import logging
 import json
 import time
 import asyncio
 import requests
+import redis  # <--- حتماً در requirements.txt باشه
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
-import os
 
 # --- تنظیمات از Environment Variables ---
 TOKEN = os.environ["TOKEN"]
 UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
 
+# --- لاگ ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- تست اتصال Redis ---
-def redis_get(key):
-    try:
-        url = f"{UPSTASH_REDIS_REST_URL}/get/{key}"
-        headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return json.loads(data['result']) if data['result'] else []
-        return []
-    except Exception as e:
-        logger.error(f"Redis GET error: {e}")
-        return []
-
-def redis_set(key, value):
-  # --- اتصال به Redis ---
+# --- اتصال به Redis (TCP/SSL) ---
 try:
     r = redis.from_url(
         UPSTASH_REDIS_URL,
         decode_responses=True,
-        ssl_cert_reqs=None
+        ssl_cert_reqs=None  # برای Upstash حیاتیه
     )
     r.ping()
-    logger.info("Redis متصل شد! (rediss)")
+    logger.info("Redis متصل شد! (rediss://)")
 except Exception as e:
     logger.error(f"خطا در اتصال به Redis: {e}")
     raise
 
-# تست اولیه
-if not redis_set("test_key", "connected"):
-    logger.error("Redis connection failed!")
-    raise Exception("Redis not connected")
+# --- توابع Redis ---
+def get_user_data(user_id):
+    data = r.get(f"user:{user_id}")
+    return json.loads(data) if data else []
 
-logger.info("Redis REST connected successfully")
+def set_user_data(user_id, data):
+    r.set(f"user:{user_id}", json.dumps(data, ensure_ascii=False))
+
+# --- قیمت ---
+def get_price(cg_id):
+    try:
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
+        response = requests.get(url, timeout=10)
+        return response.json().get(cg_id, {}).get('usd')
+    except Exception as e:
+        logger.error(f"Price error: {e}")
+        return None
+
+# --- چک قیمت دوره‌ای ---
+async def check_prices(app):
+    while True:
+        try:
+            current_time = time.time()
+            keys = r.keys("user:*")
+            for key in keys:
+                try:
+                    user_id = int(key.split(":")[1])
+                    settings = get_user_data(user_id)
+                    if not settings:
+                        continue
+
+                    for item in settings[:]:
+                        price = get_price(item['cg_id'])
+                        if price is None:
+                            continue
+
+                        last_sent = item.get('last_sent', 0)
+                        period_seconds = item['period'] * 60
+                        if current_time - last_sent < period_seconds:
+                            continue
+
+                        if 'alert' not in item:
+                            message = (
+                                f"قیمت لحظه‌ای\n\n"
+                                f"**نام ارز:** `{item['symbol']}`\n"
+                                f"**قیمت:** `${price:,.2f}`"
+                            )
+                        else:
+                            op = item['alert']['op']
+                            target = item['alert']['price']
+                            condition = (op == '>=' and price >= target) or (op == '<=' and price <= target)
+                            if not condition:
+                                continue
+                            op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
+                            message = (
+                                f"هشدار قیمت!\n\n"
+                                f"**نام ارز:** `{item['symbol']}`\n"
+                                f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
+                                f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
+                            )
+
+                        try:
+                            await app.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
+                            item['last_sent'] = current_time
+                        except Exception as send_e:
+                            logger.warning(f"Send error to {user_id}: {send_e}")
+
+                    set_user_data(user_id, settings)
+                except Exception as e:
+                    logger.error(f"User {key} error: {e}")
+        except Exception as e:
+            logger.error(f"Check prices error: {e}")
+        await asyncio.sleep(60)
 
 # --- ایموجی‌ها ---
-TICK = "✅"
-CROSS = "❌"
-COIN = "💰"
-EDIT = "✏️"
-ALERT = "🔔"
-DELETE = "🗑️"
-BACK = "🔙"
-SEARCH = "🔍"
-CANCEL = "❌"
+TICK = "Checkmark"
+CROSS = "Cross"
+COIN = "Coin"
+EDIT = "Pencil"
+ALERT = "Bell"
+DELETE = "Trash"
+BACK = "Back"
+SEARCH = "Magnifying Glass"
+CANCEL = "Cancel"
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
@@ -109,84 +163,6 @@ TIME_OPTIONS = [
     (36 * 60, "۳۶ ساعت"), (7 * 24 * 60, "هفته‌ای یکبار")
 ]
 
-# --- توابع Redis ---
-def get_user_data(user_id):
-    return redis_get(f"user:{user_id}")
-
-def set_user_data(user_id, data):
-    return redis_set(f"user:{user_id}", data)
-
-# --- قیمت ---
-def get_price(cg_id):
-    try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
-        response = requests.get(url, timeout=10)
-        return response.json().get(cg_id, {}).get('usd')
-    except Exception as e:
-        logger.error(f"Price error: {e}")
-        return None
-
-# --- چک قیمت دوره‌ای ---
-async def check_prices(app):
-    while True:
-        try:
-            current_time = time.time()
-            # لیست کلیدها رو از Redis بگیر (محدود به 100 کاربر اخیر، برای بهینه‌سازی)
-            keys_response = requests.get(f"{UPSTASH_REDIS_REST_URL}/keys/user:*", headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"})
-            if keys_response.status_code != 200:
-                await asyncio.sleep(60)
-                continue
-            keys = keys_response.json().get('result', [])
-            
-            for key in keys[:100]:  # محدود برای سرعت
-                user_id = int(key.split(":")[1])
-                settings = get_user_data(user_id)
-                if not settings:
-                    continue
-
-                for item in settings[:]:
-                    price = get_price(item['cg_id'])
-                    if price is None:
-                        continue
-
-                    last_sent = item.get('last_sent', 0)
-                    period_seconds = item['period'] * 60
-                    if current_time - last_sent < period_seconds:
-                        continue
-
-                    if 'alert' not in item:
-                        message = (
-                            f"{COIN} قیمت لحظه‌ای\n\n"
-                            f"**نام ارز:** `{item['symbol']}`\n"
-                            f"**قیمت:** `${price:,.2f}`"
-                        )
-                    else:
-                        op = item['alert']['op']
-                        target = item['alert']['price']
-                        condition = (op == '>=' and price >= target) or (op == '<=' and price <= target)
-                        if not condition:
-                            continue
-                        op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
-                        message = (
-                            f"{ALERT} هشدار قیمت!\n\n"
-                            f"**نام ارز:** `{item['symbol']}`\n"
-                            f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
-                            f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
-                        )
-
-                    try:
-                        await app.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
-                        item['last_sent'] = current_time
-                    except Exception as send_e:
-                        logger.error(f"Send message error to {user_id}: {send_e}")
-
-                set_user_data(user_id, settings)
-
-        except Exception as e:
-            logger.error(f"Check prices error: {e}")
-        
-        await asyncio.sleep(60)  # هر دقیقه
-
 # --- منو ---
 def main_menu():
     return InlineKeyboardMarkup([
@@ -198,10 +174,9 @@ def main_menu():
 # --- /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if get_user_data(user_id) == []:
+    if not r.exists(f"user:{user_id}"):
         set_user_data(user_id, [])
     context.user_data.clear()
-
     await update.message.reply_text(
         f"**به ربات استعلام قیمت ارز خوش اومدی!**\n\n\n"
         f"{COIN} ارزهای معروف رو با **دکمه** انتخاب کن\n\n"
@@ -299,7 +274,6 @@ async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
     settings = get_user_data(user_id)
-
     if any(c['cg_id'] == cg_id for c in settings):
         price = get_price(cg_id)
         if price:
@@ -330,7 +304,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         'last_sent': time.time()
     })
     set_user_data(user_id, settings)
-
     confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
     if hasattr(query_or_msg, 'edit_message_text'):
         await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
@@ -344,7 +317,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
             text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
             parse_mode='Markdown'
         )
-
     await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
 
 # --- لیست ارزها ---
@@ -469,12 +441,10 @@ async def save_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]]
         await update.message.reply_text(f"{CROSS} فقط عدد معتبر وارد کنید (مثلاً 10000 یا 10000.50)!", reply_markup=InlineKeyboardMarkup(keyboard))
         return
-
     temp = context.user_data.get('temp_alert')
     if not temp:
         await update.message.reply_text(f"{CROSS} خطا! دوباره امتحان کن.", reply_markup=main_menu())
         return
-
     cg_id = temp['cg_id']
     op = temp['op']
     op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
@@ -568,8 +538,7 @@ async def post_init(application: Application):
         BotCommand("start", "شروع ربات و منوی اصلی"),
         BotCommand("menu", "نمایش منوی اصلی")
     ])
-    # شروع چک قیمت
-    application.job_queue.run_repeating(check_prices, interval=60, first=10)  # هر 60 ثانیه
+    application.create_task(check_prices(application))
 
 # --- اجرا ---
 if __name__ == '__main__':
@@ -607,6 +576,3 @@ if __name__ == '__main__':
         url_path=TOKEN,
         webhook_url=WEBHOOK_URL
     )
-
-
-
