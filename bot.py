@@ -59,14 +59,54 @@ def get_user_data(user_id):
 def set_user_data(user_id, data):
     r.set(f"user:{user_id}", json.dumps(data, ensure_ascii=False))
 
-# --- قیمت ---
+# --- کش قیمت (در Redis) ---
+PRICE_CACHE_TTL = 55  # 55 ثانیه کش
+
 def get_price(cg_id):
+    cache_key = f"price:{cg_id}"
+    try:
+        # ۱. اول از کش بخون
+        cached = r.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            if time.time() - data['timestamp'] < PRICE_CACHE_TTL:
+                return data['price']
+    except Exception as e:
+        logger.warning(f"Cache read error: {e}")
+
+    # ۲. اگر کش نبود یا منقضی شده بود، API بزن
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
-        response = requests.get(url, timeout=15)
-        return response.json().get(cg_id, {}).get('usd')
+        headers = {
+            "User-Agent": "CryptoPriceBot/1.0",
+            "Accept": "application/json"
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 429:
+            logger.warning("CoinGecko rate limit! Using cache or skipping...")
+            return None  # بعداً دوباره امتحان می‌کنه
+
+        data = response.json()
+        price = data.get(cg_id, {}).get('usd')
+        
+        if price is not None:
+            # ۳. کش کن
+            cache_data = {
+                'price': price,
+                'timestamp': time.time()
+            }
+            try:
+                r.setex(cache_key, PRICE_CACHE_TTL, json.dumps(cache_data))
+            except Exception as e:
+                logger.warning(f"Cache write error: {e}")
+            return price
+        else:
+            logger.warning(f"No price in response for {cg_id}")
+            return None
+
     except Exception as e:
-        logger.error(f"Price error: {e}")
+        logger.error(f"Price API error: {e}")
         return None
 
 # --- چک قیمت دوره‌ای (امن) ---
@@ -760,6 +800,7 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
 
