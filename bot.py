@@ -90,9 +90,12 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                         period_seconds = item['period'] * 60
                         if current_time - last_sent < period_seconds:
                             continue
-
                         if 'alert' not in item:
-                            message = f"قیمت لحظه‌ای\n\n**نام ارز:** `{item['symbol']}`\n**قیمت:** `${price:,.2f}`"
+                            message = (
+                                f"قیمت لحظه‌ای\n\n"
+                                f"**نام ارز:** `{item['symbol']}`\n"
+                                f"**قیمت:** `${price:,.2f}`"
+                            )
                         else:
                             op = item['alert']['op']
                             target = item['alert']['price']
@@ -100,8 +103,12 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                             if not condition:
                                 continue
                             op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
-                            message = f"هشدار قیمت!\n\n**نام ارز:** `{item['symbol']}`\n**قیمت لحظه‌ای:** `${price:,.2f}`\n\n**شرط فعال شده:** {op_text} `${target:,.2f}`"
-
+                            message = (
+                                f"هشدار قیمت!\n\n"
+                                f"**نام ارز:** `{item['symbol']}`\n"
+                                f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
+                                f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
+                            )
                         try:
                             await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
                             item['last_sent'] = current_time
@@ -113,18 +120,17 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Check prices error: {e}")
         await asyncio.sleep(60)
-        
 
 # --- ایموجی‌ها ---
-TICK = "✅"
-CROSS = "❌"
-COIN = "💰"
-EDIT = "✏️"
-ALERT = "🔔"
-DELETE = "🗑️"
-BACK = "🔙"
-SEARCH = "🔍"
-CANCEL = "❌"
+TICK = "Check Mark"
+CROSS = "Cross Mark"
+COIN = "Coin"
+EDIT = "Pencil"
+ALERT = "Bell"
+DELETE = "Trash"
+BACK = "Back Arrow"
+SEARCH = "Magnifying Glass"
+CANCEL = "Cross Mark"
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
@@ -399,7 +405,7 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for mins, label in TIME_OPTIONS:
         keyboard.append([InlineKeyboardButton(label, callback_data=f"settime_{cg_id}_{mins}")])
-    keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f"edit_{cg_id}")])
+    keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f=f"edit_{cg_id}")])
     await query.edit_message_text(f"{EDIT} زمان `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def save_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -592,7 +598,7 @@ if __name__ == '__main__':
         1
     )
 
-      # --- Flask برای /health و /TOKEN ---
+    # --- Flask برای /health و /TOKEN ---
     flask_app = Flask(__name__)
 
     @flask_app.route('/health', methods=['GET'])
@@ -603,17 +609,17 @@ if __name__ == '__main__':
         except Exception as e:
             return f'Redis Down: {str(e)}', 500
 
- @flask_app.route(f'/{TOKEN}', methods=['POST'])
-async def telegram_webhook():
-    try:
-        await app.initialize()  # <--- اضافه شد
-        json_data = request.get_data(as_text=True)
-        update = Update.de_json(json.loads(json_data), app.bot)
-        await app.process_update(update)
-        return 'OK'
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return 'Error', 500
+    @flask_app.route(f'/{TOKEN}', methods=['POST'])
+    async def telegram_webhook():
+        try:
+            await app.initialize()
+            json_data = request.get_data(as_text=True)
+            update = Update.de_json(json.loads(json_data), app.bot)
+            await app.process_update(update)
+            return 'OK'
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            return 'Error', 500
 
     def run_flask():
         PORT = int(os.environ.get("PORT", 10000))
@@ -621,12 +627,12 @@ async def telegram_webhook():
 
     # --- تنظیم Webhook تلگرام ---
     async def set_webhook():
-    try:
-        await app.initialize()  # <--- اضافه شد
-        await app.bot.set_webhook(url=WEBHOOK_URL)
-        logger.info(f"Webhook set: {WEBHOOK_URL}")
-    except Exception as e:
-        logger.error(f"Failed to set webhook: {e}")
+        try:
+            await app.initialize()
+            await app.bot.set_webhook(url=WEBHOOK_URL)
+            logger.info(f"Webhook set: {WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
 
     # --- اجرای Flask در ترد اصلی ---
     threading.Thread(target=run_flask, daemon=True).start()
@@ -641,6 +647,3 @@ async def telegram_webhook():
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-
-
-
