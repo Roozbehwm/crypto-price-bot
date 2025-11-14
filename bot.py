@@ -122,15 +122,16 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(60)
 
 # --- ایموجی‌ها ---
-TICK = "Check Mark"
-CROSS = "Cross Mark"
-COIN = "Coin"
-EDIT = "Pencil"
-ALERT = "Bell"
-DELETE = "Trash"
-BACK = "Back Arrow"
-SEARCH = "Magnifying Glass"
-CANCEL = "Cross Mark"
+TICK = "✅"
+CROSS = "❌"
+COIN = "💰"
+EDIT = "✏️"
+ALERT = "🔔"
+DELETE = "🗑️"
+BACK = "🔙"
+SEARCH = "🔍"
+CANCEL = "❌"
+
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
@@ -405,7 +406,7 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for mins, label in TIME_OPTIONS:
         keyboard.append([InlineKeyboardButton(label, callback_data=f"settime_{cg_id}_{mins}")])
-    keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f=f"edit_{cg_id}")])
+    keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f"edit_{cg_id}")])  # درست شد
     await query.edit_message_text(f"{EDIT} زمان `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
 async def save_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -647,3 +648,4 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
