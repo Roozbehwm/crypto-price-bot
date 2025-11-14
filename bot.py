@@ -228,8 +228,14 @@ async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append(row)
     keyboard.append([InlineKeyboardButton(f"{SEARCH} جستجوی پیشرفته", callback_data='search_coin')])
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data='back')])
-    await query.edit_message_text("ارز رو انتخاب کن:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+    await context.application.bot.edit_message_text(
+        chat_id=query.from_user.id,
+        message_id=query.message.message_id,
+        text="ارز رو انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    
 async def select_popular(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -675,6 +681,7 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
 
