@@ -722,8 +722,6 @@ if __name__ == '__main__':
 if __name__ == '__main__':
     # ساخت اپلیکیشن
     app = Application.builder().token(TOKEN).build()
-
-    # هندلر خطاها
     app.add_error_handler(error_handler)
 
     # --- هندلرها ---
@@ -746,8 +744,9 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # --- تابع شروع Flask ---
+    # --- Flask App ---
     flask_app = Flask(__name__)
+    main_loop = None  # loop مشترک
 
     @flask_app.route('/health', methods=['GET'])
     def health_check():
@@ -758,22 +757,25 @@ if __name__ == '__main__':
             return f'Redis Down: {str(e)}', 500
 
     @flask_app.route(f'/{TOKEN}', methods=['POST'])
-    async def telegram_webhook():
+    def telegram_webhook():
         try:
-            await app.initialize()
             json_data = request.get_data(as_text=True)
             update = Update.de_json(json.loads(json_data), app.bot)
-            await app.process_update(update)
+            future = run_coroutine_threadsafe(app.process_update(update), main_loop)
+            future.result(timeout=10)
             return 'OK'
         except Exception as e:
             logger.error(f"Webhook error: {e}")
             return 'Error', 500
 
     def run_flask():
+        global main_loop
+        main_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(main_loop)
         PORT = int(os.environ.get("PORT", 10000))
         flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-    # --- تابع تنظیم Webhook ---
+    # --- تنظیم Webhook ---
     async def set_webhook():
         try:
             await app.initialize()
@@ -782,65 +784,40 @@ if __name__ == '__main__':
         except Exception as e:
             logger.error(f"Failed to set webhook: {e}")
 
-    # --- تابع شروع چک قیمت (جداگانه) ---
+    # --- چک قیمت در ترد جدا ---
     def start_price_checker():
-        # --- متغیر سراسری برای loop اصلی ---
-        main_loop = None
+        async def run_checker():
+            await app.initialize()
+            while True:
+                try:
+                    ctx = ContextTypes.DEFAULT_TYPE(application=app)
+                    await safe_check_prices(ctx)
+                except Exception as e:
+                    logger.error(f"Price checker error: {e}")
+                await asyncio.sleep(60)
+        
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_checker())
 
-        # --- اجرای Flask در ترد با loop مشترک ---
-        def run_flask():
-            global main_loop
-            main_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(main_loop)
-            flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
-        
-        # --- Webhook Flask (sync) ---
-        @flask_app.route(f'/{TOKEN}', methods=['POST'])
-        def telegram_webhook():
-            try:
-                json_data = request.get_data(as_text=True)
-                update = Update.de_json(json.loads(json_data), app.bot)
-                
-                # اجرا در loop اصلی
-                future = run_coroutine_threadsafe(app.process_update(update), main_loop)
-                future.result(timeout=10)
-                
-                return 'OK'
-            except Exception as e:
-                logger.error(f"Webhook error: {e}")
-                return 'Error', 500
-        
-        # --- تابع شروع چک قیمت (جداگانه) ---
-        def start_price_checker():
-            async def run_checker():
-                await app.initialize()
-                while True:
-                    try:
-                        ctx = ContextTypes.DEFAULT_TYPE(application=app)
-                        await safe_check_prices(ctx)
-                    except Exception as e:
-                        logger.error(f"Price checker loop error: {e}")
-                    await asyncio.sleep(60)
-            
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(run_checker())
-        
-             # --- اجرای نهایی (برای Render) ---
-            flask_thread = threading.Thread(target=run_flask, daemon=True)
-            flask_thread.start()
-            
-            asyncio.run(set_webhook())
-            
-            checker_thread = threading.Thread(target=start_price_checker, daemon=True)
-            checker_thread.start()
-            
-            logger.info("Bot is running... (24/7 on Render)")
-            try:
-                while True:
-                    time.sleep(3600)
-            except KeyboardInterrupt:
-                logger.info("Shutting down...")
+    # --- اجرای اصلی (در یک coroutine) ---
+    async def main():
+        # ۱. Webhook رو تنظیم کن
+        await set_webhook()
+
+        # ۲. Flask رو در ترد جدا شروع کن
+        threading.Thread(target=run_flask, daemon=True).start()
+
+        # ۳. چک قیمت رو در ترد جدا شروع کن
+        threading.Thread(target=start_price_checker, daemon=True).start()
+
+        # ۴. برنامه رو زنده نگه دار
+        logger.info("Bot is running... (24/7 on Render)")
+        while True:
+            await asyncio.sleep(3600)
+
+    # --- اجرا ---
+    asyncio.run(main())
 
 
 
