@@ -83,10 +83,14 @@ def get_price(cg_id):
         }
         response = requests.get(url, headers=headers, timeout=10)
         
+        # در get_price اضافه کن:
         if response.status_code == 429:
-            logger.warning("CoinGecko rate limit! Using cache or skipping...")
-            return None  # بعداً دوباره امتحان می‌کنه
-
+            logger.warning("CoinGecko rate limit! Using cache...")
+            cached = r.get(f"price:{cg_id}")
+            if cached:
+                return json.loads(cached)['price']
+            return None
+            
         data = response.json()
         price = data.get(cg_id, {}).get('usd')
         
@@ -780,9 +784,7 @@ if __name__ == '__main__':
         asyncio.set_event_loop(loop)
         loop.run_until_complete(run_checker())
 
-    # ========================================
-    # === اجرای نهایی (ترتیب مهم است!) ===
-    # ========================================
+
 
     # ۱. Flask رو در ترد جدا شروع کن (برای Webhook)
     threading.Thread(target=run_flask, daemon=True).start()
@@ -800,6 +802,7 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
 
