@@ -604,16 +604,17 @@ if __name__ == '__main__':
         except Exception as e:
             return f'Redis Down: {str(e)}', 500
 
-    @flask_app.route(f'/{TOKEN}', methods=['POST'])
-    async def telegram_webhook():
-        try:
-            json_data = request.get_data(as_text=True)
-            update = Update.de_json(json.loads(json_data), app.bot)
-            await app.process_update(update)
-            return 'OK'
-        except Exception as e:
-            logger.error(f"Webhook error: {e}")
-            return 'Error', 500
+ @flask_app.route(f'/{TOKEN}', methods=['POST'])
+async def telegram_webhook():
+    try:
+        await app.initialize()  # <--- اضافه شد
+        json_data = request.get_data(as_text=True)
+        update = Update.de_json(json.loads(json_data), app.bot)
+        await app.process_update(update)
+        return 'OK'
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'Error', 500
 
     def run_flask():
         PORT = int(os.environ.get("PORT", 10000))
@@ -621,11 +622,12 @@ if __name__ == '__main__':
 
     # --- تنظیم Webhook تلگرام ---
     async def set_webhook():
-        try:
-            await app.bot.set_webhook(url=WEBHOOK_URL)
-            logger.info(f"Webhook set: {WEBHOOK_URL}")
-        except Exception as e:
-            logger.error(f"Failed to set webhook: {e}")
+    try:
+        await app.initialize()  # <--- اضافه شد
+        await app.bot.set_webhook(url=WEBHOOK_URL)
+        logger.info(f"Webhook set: {WEBHOOK_URL}")
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
 
     # --- اجرای Flask در ترد اصلی ---
     threading.Thread(target=run_flask, daemon=True).start()
@@ -640,4 +642,5 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
