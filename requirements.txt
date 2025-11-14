@@ -1,6 +1,19 @@
-python-telegram-bot[job-queue,webhooks]==21.5
+python-telegram-bot[job-queue]==21.5
 redis==5.0.8
 requests==2.32.3
 flask==3.0.3
+``` |
+| `runtime.txt` | `python-3.11.9` |
 
+---
 
+### در Render.com:
+
+1. **New Web Service** → GitHub یا Manual
+2. **Repository** → پروژه‌ت
+3. **Environment Variables**:
+
+```env
+TOKEN=8322593671:AAH62A7o9ooFtRpJ2sv2kM_uPuCMfYl4lhM
+UPSTASH_REDIS_URL=redis-cli --tls -u redis://default:ATgJAAIncDI3M2E5YjA2Mzk5YjI0YTJkOWE3YzBmNjUwMGZjNzA0OHAyMTQzNDU@certain-manatee-14345.upstash.io:6379
+RENDER_EXTERNAL_URL=https://crypto-bot-data.onrender.com
