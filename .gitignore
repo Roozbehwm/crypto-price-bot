@@ -1,4 +1,33 @@
-python-telegram-bot[job-queue]==21.5
-redis==5.0.8
-requests==2.32.3
-flask==3.0.3
+# محیط مجازی
+venv/
+env/
+ENV/
+
+# فایل‌های پایتون
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+
+# فایل‌های لاگ
+*.log
+
+# فایل‌های محیط
+.env
+.env.local
+.env.production
+
+# فایل‌های IDE
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+
+# فایل‌های Render (اختیاری)
+render.yaml
+render.yml
+
+# فایل‌های بزرگ یا شخصی
+*.db
+*.sqlite3
