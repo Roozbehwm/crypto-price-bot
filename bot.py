@@ -770,38 +770,66 @@ if __name__ == '__main__':
 
     # --- تابع شروع چک قیمت (جداگانه) ---
     def start_price_checker():
-        async def run_checker():
-            await app.initialize()
-            while True:
-                try:
-                    ctx = ContextTypes.DEFAULT_TYPE(application=app)
-                    await safe_check_prices(ctx)
-                except Exception as e:
-                    logger.error(f"Price checker loop error: {e}")
-                await asyncio.sleep(60)
+       # --- متغیر سراسری برای loop اصلی (مهم!) ---
+main_loop = None
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_checker())
+# --- اجرای Flask در ترد با loop مشترک ---
+def run_flask():
+    global main_loop
+    main_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(main_loop)
+    flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-
-
-    # ۱. Flask رو در ترد جدا شروع کن (برای Webhook)
-    threading.Thread(target=run_flask, daemon=True).start()
-
-    # ۲. Webhook تلگرام رو تنظیم کن
-    asyncio.run(set_webhook())
-
-    # ۳. چک قیمت رو در ترد جدا شروع کن
-    threading.Thread(target=start_price_checker, daemon=True).start()
-
-    # ۴. برنامه رو زنده نگه دار
-    logger.info("Bot is running... (24/7 on Render)")
+# --- Webhook Flask (sync) ---
+@flask_app.route(f'/{TOKEN}', methods=['POST'])
+def telegram_webhook():
     try:
+        json_data = request.get_data(as_text=True)
+        update = Update.de_json(json.loads(json_data), app.bot)
+        
+        # اجرا در loop اصلی (بدون await)
+        future = run_coroutine_threadsafe(app.process_update(update), main_loop)
+        future.result(timeout=10)  # حداکثر 10 ثانیه صبر کن
+        
+        return 'OK'
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'Error', 500
+
+# --- تابع شروع چک قیمت (جداگانه) ---
+def start_price_checker():
+    async def run_checker():
+        await app.initialize()
         while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
+            try:
+                ctx = ContextTypes.DEFAULT_TYPE(application=app)
+                await safe_check_prices(ctx)
+            except Exception as e:
+                logger.error(f"Price checker loop error: {e}")
+            await asyncio.sleep(60)
+    
+    # هر ترد loop خودش رو داره
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(run_checker())
+
+# --- اجرای نهایی (ترتیب مهم!) ---
+# ۱. Flask رو در ترد جدا شروع کن
+threading.Thread(target=run_flask, daemon=True).start()
+
+# ۲. Webhook تلگرام رو تنظیم کن
+asyncio.run(set_webhook())
+
+# ۳. چک قیمت رو در ترد جدا شروع کن
+threading.Thread(target=start_price_checker, daemon=True).start()
+
+# ۴. برنامه رو زنده نگه دار
+logger.info("Bot is running... (24/7 on Render)")
+try:
+    while True:
+        time.sleep(3600)
+except KeyboardInterrupt:
+    logger.info("Shutting down...")
 
 
 
