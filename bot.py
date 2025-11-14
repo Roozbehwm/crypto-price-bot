@@ -204,7 +204,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # --- /menu ---
+
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query  
+    await query.answer()          
     context.user_data.clear()
     await update.message.reply_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
 
@@ -299,8 +302,10 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
             await app.bot.send_message(chat_id=user_id, text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست.")
         if hasattr(query_or_msg, 'edit_message_text'):
             await query_or_msg.edit_message_text(f"{TICK} **{symbol}** قبلاً اضافه شده!")
-        await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
+        else:
+            await query_or_msg.reply_text(f"{TICK} **{symbol}** قبلاً اضافه شده!", reply_markup=main_menu())
         return
+
     if len(settings) >= MAX_COINS:
         text = f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\nاول یکی رو با {DELETE} پاک کن."
         if hasattr(query_or_msg, 'edit_message_text'):
@@ -308,6 +313,7 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         else:
             await query_or_msg.reply_text(text, reply_markup=main_menu(), parse_mode='Markdown')
         return
+
     settings.append({
         'symbol': symbol,
         'cg_id': cg_id,
@@ -316,10 +322,15 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
     })
     set_user_data(user_id, settings)
     confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
+
+    if hasattr(query_or_msg, 'answer'):
+        await query_or_msg.answer()  # <--- اضافه کن
+
     if hasattr(query_or_msg, 'edit_message_text'):
         await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
     else:
         await query_or_msg.reply_text(confirm_msg, parse_mode='Markdown')
+
     price = get_price(cg_id)
     if price:
         await app.bot.send_message(
@@ -328,6 +339,7 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
             parse_mode='Markdown'
         )
     await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
+    
 
 # --- لیست ارزها ---
 async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,4 +630,5 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
