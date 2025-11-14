@@ -593,7 +593,7 @@ if __name__ == '__main__':
         1
     )
 
-    # --- Flask برای /health و /TOKEN ---
+      # --- Flask برای /health و /TOKEN ---
     flask_app = Flask(__name__)
 
     @flask_app.route('/health', methods=['GET'])
@@ -605,15 +605,15 @@ if __name__ == '__main__':
             return f'Redis Down: {str(e)}', 500
 
     @flask_app.route(f'/{TOKEN}', methods=['POST'])
-async def telegram_webhook():
-    try:
-        json_data = request.get_data(as_text=True)
-        update = Update.de_json(json.loads(json_data), app.bot)
-        await app.process_update(update)
-        return 'OK'
-    except Exception as e:
-        logger.error(f"Webhook error: {e}")
-        return 'Error', 500
+    async def telegram_webhook():
+        try:
+            json_data = request.get_data(as_text=True)
+            update = Update.de_json(json.loads(json_data), app.bot)
+            await app.process_update(update)
+            return 'OK'
+        except Exception as e:
+            logger.error(f"Webhook error: {e}")
+            return 'Error', 500
 
     def run_flask():
         PORT = int(os.environ.get("PORT", 10000))
@@ -640,5 +640,4 @@ async def telegram_webhook():
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-
 
