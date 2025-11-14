@@ -126,14 +126,21 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                     settings = get_user_data(user_id)
                     if not settings:
                         continue
+
+                    updated = False  # آیا چیزی ارسال شد؟
+
                     for item in settings[:]:
                         price = get_price(item['cg_id'])
                         if price is None:
                             continue
+
                         last_sent = item.get('last_sent', 0)
                         period_seconds = item['period'] * 60
+
                         if current_time - last_sent < period_seconds:
                             continue
+
+                        # --- ساخت پیام ---
                         if 'alert' not in item:
                             message = (
                                 f"قیمت لحظه‌ای\n\n"
@@ -153,17 +160,24 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                                 f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
                                 f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
                             )
+
+                        # --- ارسال پیام ---
                         try:
                             await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
                             item['last_sent'] = current_time
+                            updated = True
                         except Exception as send_e:
                             logger.warning(f"Send error to {user_id}: {send_e}")
+
+                    # --- همیشه ذخیره کن (حتی اگر هیچی ارسال نشد) ---
                     set_user_data(user_id, settings)
+
                 except Exception as e:
                     logger.error(f"User {key} error: {e}")
         except Exception as e:
             logger.error(f"Check prices error: {e}")
         await asyncio.sleep(60)
+        
 
 # --- ایموجی‌ها ---
 TICK = "✅"
@@ -830,6 +844,7 @@ if __name__ == '__main__':
                 time.sleep(3600)
         except KeyboardInterrupt:
             logger.info("Shutting down...")
+
 
 
 
