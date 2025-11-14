@@ -595,10 +595,12 @@ if __name__ == '__main__':
         PORT = int(os.environ.get("PORT", 10000))
         flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-    # --- تنظیم Webhook تلگرام ---
+      # --- تنظیم Webhook تلگرام ---
     async def set_webhook():
         try:
+            await app.initialize()  # <--- خط جدید
             await app.bot.set_webhook(url=WEBHOOK_URL)
+            await app.start()       # <--- خط جدید
             logger.info(f"Webhook set: {WEBHOOK_URL}")
         except Exception as e:
             logger.error(f"Failed to set webhook: {e}")
@@ -616,3 +618,4 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
