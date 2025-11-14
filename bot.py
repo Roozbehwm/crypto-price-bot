@@ -692,35 +692,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # --- اجرا ---
 if __name__ == '__main__':
-    # ساخت اپلیکیشن
-    app = Application.builder().token(TOKEN).build()
-
-    # هندلر خطاها
-    app.add_error_handler(error_handler)
-
-    # --- هندلرها ---
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
-    app.add_handler(CallbackQueryHandler(select_popular, pattern='^select_pop_'))
-    app.add_handler(CallbackQueryHandler(search_coin_start, pattern='^search_coin$'))
-    app.add_handler(CallbackQueryHandler(cancel, pattern='^cancel$'))
-    app.add_handler(CallbackQueryHandler(select_search, pattern=r'^select_search\|'))
-    app.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
-    app.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
-    app.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
-    app.add_handler(CallbackQueryHandler(save_time, pattern='^settime_'))
-    app.add_handler(CallbackQueryHandler(set_alert, pattern='^alert_'))
-    app.add_handler(CallbackQueryHandler(select_alert_op, pattern='^alertop_'))
-    app.add_handler(CallbackQueryHandler(clear_alert, pattern='^clearalert_'))
-    app.add_handler(CallbackQueryHandler(remove_coin, pattern='^remove_'))
-    app.add_handler(CallbackQueryHandler(help_cmd, pattern='^help$'))
-    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-  
-if __name__ == '__main__':
-    # ساخت اپلیکیشن
+    # --- ساخت اپلیکیشن (فقط یک بار) ---
     app = Application.builder().token(TOKEN).build()
     app.add_error_handler(error_handler)
 
@@ -744,9 +716,9 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # --- Flask App ---
+    # --- Flask ---
     flask_app = Flask(__name__)
-    main_loop = None  # loop مشترک
+    main_loop = None
 
     @flask_app.route('/health', methods=['GET'])
     def health_check():
@@ -775,49 +747,43 @@ if __name__ == '__main__':
         PORT = int(os.environ.get("PORT", 10000))
         flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-    # --- تنظیم Webhook ---
+    # --- Webhook (بدون initialize) ---
     async def set_webhook():
         try:
-            await app.initialize()
             await app.bot.set_webhook(url=WEBHOOK_URL)
             logger.info(f"Webhook set: {WEBHOOK_URL}")
         except Exception as e:
             logger.error(f"Failed to set webhook: {e}")
 
-    # --- چک قیمت در ترد جدا ---
-    def start_price_checker():
-        async def run_checker():
-            await app.initialize()
-            while True:
-                try:
-                    ctx = ContextTypes.DEFAULT_TYPE(application=app)
-                    await safe_check_prices(ctx)
-                except Exception as e:
-                    logger.error(f"Price checker error: {e}")
-                await asyncio.sleep(60)
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(run_checker())
+    # --- چک قیمت (بدون initialize) ---
+    async def run_price_checker():
+        while True:
+            try:
+                ctx = ContextTypes.DEFAULT_TYPE(application=app)
+                await safe_check_prices(ctx)
+            except Exception as e:
+                logger.error(f"Price checker error: {e}")
+            await asyncio.sleep(60)
 
-    # --- اجرای اصلی (در یک coroutine) ---
+    # --- اجرای اصلی ---
     async def main():
-        # ۱. Webhook رو تنظیم کن
+        # ۱. Webhook
         await set_webhook()
 
-        # ۲. Flask رو در ترد جدا شروع کن
+        # ۲. Flask
         threading.Thread(target=run_flask, daemon=True).start()
 
-        # ۳. چک قیمت رو در ترد جدا شروع کن
-        threading.Thread(target=start_price_checker, daemon=True).start()
+        # ۳. چک قیمت
+        asyncio.create_task(run_price_checker())
 
-        # ۴. برنامه رو زنده نگه دار
+        # ۴. زنده نگه داشتن
         logger.info("Bot is running... (24/7 on Render)")
         while True:
             await asyncio.sleep(3600)
 
     # --- اجرا ---
     asyncio.run(main())
+
 
 
 
