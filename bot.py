@@ -122,15 +122,15 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(60)
 
 # --- ایموجی‌ها ---
-TICK = "Check Mark"
-CROSS = "Cross Mark"
-COIN = "Coin"
-EDIT = "Pencil"
-ALERT = "Bell"
-DELETE = "Trash"
-BACK = "Back Arrow"
-SEARCH = "Magnifying Glass"
-CANCEL = "Cross Mark"
+TICK = "✅"
+CROSS = "❌"
+COIN = "💰"
+EDIT = "✏️"
+ALERT = "🔔"
+DELETE = "🗑️"
+BACK = "🔙"
+SEARCH = "🔍"
+CANCEL = "❌"
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
@@ -634,3 +634,4 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
