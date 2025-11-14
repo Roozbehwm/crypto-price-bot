@@ -289,18 +289,18 @@ async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await add_coin_logic(user_id, symbol, cg_id, query)
     context.user_data.clear()
 
-async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
+async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextTypes.DEFAULT_TYPE):
     settings = get_user_data(user_id)
     if any(c['cg_id'] == cg_id for c in settings):
         price = get_price(cg_id)
         if price:
-            await query_or_msg.message.bot.send_message(
+            await context.application.bot.send_message(
                 chat_id=user_id,
                 text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
                 parse_mode='Markdown'
             )
         else:
-            await query_or_msg.message.bot.send_message(
+            await context.application.bot.send_message(
                 chat_id=user_id,
                 text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست."
             )
@@ -337,12 +337,12 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
 
     price = get_price(cg_id)
     if price:
-        await query_or_msg.message.bot.send_message(
+        await context.application.bot.send_message(
             chat_id=user_id,
             text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
             parse_mode='Markdown'
         )
-    await query_or_msg.message.bot.send_message(
+    await context.application.bot.send_message(
         chat_id=user_id,
         text=f"{BACK} منوی اصلی:",
         reply_markup=main_menu()
@@ -648,4 +648,5 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
