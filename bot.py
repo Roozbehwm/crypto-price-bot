@@ -64,54 +64,51 @@ PRICE_CACHE_TTL = 55  # 55 ثانیه کش
 
 def get_price(cg_id):
     cache_key = f"price:{cg_id}"
+    
+    # ۱. همیشه از کش بخون (حتی اگر قدیمی باشه)
     try:
-        # ۱. اول از کش بخون
         cached = r.get(cache_key)
         if cached:
             data = json.loads(cached)
-            if time.time() - data['timestamp'] < PRICE_CACHE_TTL:
-                return data['price']
+            return data['price']
     except Exception as e:
         logger.warning(f"Cache read error: {e}")
 
-    # ۲. اگر کش نبود یا منقضی شده بود، API بزن
+    # ۲. درخواست به API
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
-        headers = {
-            "User-Agent": "CryptoPriceBot/1.0",
-            "Accept": "application/json"
-        }
-        response = requests.get(url, headers=headers, timeout=10)
+        headers = {"User-Agent": "CryptoBot/1.0"}
+        response = requests.get(url, headers=headers, timeout=8)
         
-        # در get_price اضافه کن:
         if response.status_code == 429:
-            logger.warning("CoinGecko rate limit! Using cache...")
-            cached = r.get(f"price:{cg_id}")
+            logger.warning("CoinGecko rate limit! Using last known price...")
+            # کش قدیمی رو برگردون
+            cached = r.get(cache_key)
             if cached:
                 return json.loads(cached)['price']
             return None
-            
+
         data = response.json()
         price = data.get(cg_id, {}).get('usd')
         
         if price is not None:
-            # ۳. کش کن
-            cache_data = {
-                'price': price,
-                'timestamp': time.time()
-            }
-            try:
-                r.setex(cache_key, PRICE_CACHE_TTL, json.dumps(cache_data))
-            except Exception as e:
-                logger.warning(f"Cache write error: {e}")
+            # کش کن برای 55 ثانیه
+            cache_data = {'price': price, 'timestamp': time.time()}
+            r.setex(cache_key, 55, json.dumps(cache_data))
             return price
-        else:
-            logger.warning(f"No price in response for {cg_id}")
-            return None
-
+            
     except Exception as e:
         logger.error(f"Price API error: {e}")
-        return None
+
+    # ۳. آخرین تلاش: کش قدیمی
+    try:
+        cached = r.get(cache_key)
+        if cached:
+            return json.loads(cached)['price']
+    except:
+        pass
+        
+    return None
 
 # --- چک قیمت دوره‌ای (امن) ---
 async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
@@ -132,7 +129,8 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                     for item in settings[:]:
                         price = get_price(item['cg_id'])
                         if price is None:
-                            continue
+                            logger.info(f"No price available for {item['symbol']} - skipping this cycle")
+                            continue  # این ارز رو skip کن، بقیه ادامه بدن
 
                         last_sent = item.get('last_sent', 0)
                         period_seconds = item['period'] * 60
@@ -783,6 +781,7 @@ if __name__ == '__main__':
 
     # --- اجرا ---
     asyncio.run(main())
+
 
 
 
