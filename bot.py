@@ -6,7 +6,7 @@ import time
 import asyncio
 import requests
 import redis
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
@@ -15,28 +15,35 @@ from telegram.ext import (
 # --- تنظیمات از Environment Variables ---
 TOKEN = os.environ["TOKEN"]
 UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
+RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
 # --- لاگ ---
-import logging  # <--- حتماً باشه!
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- دیباگ ---
+# --- چک RENDER_EXTERNAL_URL ---
+if not RENDER_EXTERNAL_URL:
+    logger.error("RENDER_EXTERNAL_URL is not set in Render Environment Variables!")
+    raise ValueError("RENDER_EXTERNAL_URL is required!")
+
+if not RENDER_EXTERNAL_URL.startswith("http"):
+    RENDER_EXTERNAL_URL = "https://" + RENDER_EXTERNAL_URL
+
+WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
+logger.info(f"Webhook URL: {WEBHOOK_URL}")
+
+# --- چک Redis URL ---
 logger.info(f"UPSTASH_REDIS_URL: {UPSTASH_REDIS_URL}")
 if not UPSTASH_REDIS_URL.startswith("rediss://"):
     logger.error("UPSTASH_REDIS_URL باید با rediss:// شروع بشه!")
     raise ValueError("Invalid Redis URL scheme")
-    
-# --- لاگ ---
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
-# --- اتصال به Redis (TCP/SSL) ---
+# --- اتصال به Redis ---
 try:
     r = redis.from_url(
         UPSTASH_REDIS_URL,
         decode_responses=True,
-        ssl_cert_reqs=None  # برای Upstash حیاتیه
+        ssl_cert_reqs=None
     )
     r.ping()
     logger.info("Redis متصل شد! (rediss://)")
@@ -74,17 +81,14 @@ async def check_prices(app):
                     settings = get_user_data(user_id)
                     if not settings:
                         continue
-
                     for item in settings[:]:
                         price = get_price(item['cg_id'])
                         if price is None:
                             continue
-
                         last_sent = item.get('last_sent', 0)
                         period_seconds = item['period'] * 60
                         if current_time - last_sent < period_seconds:
                             continue
-
                         if 'alert' not in item:
                             message = (
                                 f"قیمت لحظه‌ای\n\n"
@@ -104,13 +108,11 @@ async def check_prices(app):
                                 f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
                                 f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
                             )
-
                         try:
                             await app.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
                             item['last_sent'] = current_time
                         except Exception as send_e:
                             logger.warning(f"Send error to {user_id}: {send_e}")
-
                     set_user_data(user_id, settings)
                 except Exception as e:
                     logger.error(f"User {key} error: {e}")
@@ -173,11 +175,6 @@ TIME_OPTIONS = [
     (8 * 60, "۸ ساعت"), (12 * 60, "۱۲ ساعت"), (24 * 60, "۲۴ ساعت"),
     (36 * 60, "۳۶ ساعت"), (7 * 24 * 60, "هفته‌ای یکبار")
 ]
-
-# --- اجرای چک قیمت ---
-async def start_price_checker(app):
-    await asyncio.sleep(10)  # صبر برای راه‌اندازی
-    asyncio.create_task(check_prices(app))
 
 # --- منو ---
 def main_menu():
@@ -304,7 +301,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
             await query_or_msg.edit_message_text(f"{TICK} **{symbol}** قبلاً اضافه شده!")
         await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
         return
-
     if len(settings) >= MAX_COINS:
         text = f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\nاول یکی رو با {DELETE} پاک کن."
         if hasattr(query_or_msg, 'edit_message_text'):
@@ -312,7 +308,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         else:
             await query_or_msg.reply_text(text, reply_markup=main_menu(), parse_mode='Markdown')
         return
-
     settings.append({
         'symbol': symbol,
         'cg_id': cg_id,
@@ -325,7 +320,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
     else:
         await query_or_msg.reply_text(confirm_msg, parse_mode='Markdown')
-
     price = get_price(cg_id)
     if price:
         await app.bot.send_message(
@@ -548,13 +542,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await search_coin(update, context)
 
-
 # --- اجرا ---
 if __name__ == '__main__':
-    # ساخت اپلیکیشن تلگرام
+    # ساخت اپلیکیشن
     app = Application.builder().token(TOKEN).build()
 
-    # هندلرها
+    # --- هندلرها ---
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
@@ -564,8 +557,8 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(select_search, pattern=r'^select_search\|'))
     app.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
     app.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
-    app.add_handler(CallbackHandler(set_time, pattern='^time_'))
-    app.add_handler(CallbackQueryHandler(save_time, pattern='settime_'))
+    app.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
+    app.add_handler(CallbackQueryHandler(save_time, pattern='^settime_'))
     app.add_handler(CallbackQueryHandler(set_alert, pattern='^alert_'))
     app.add_handler(CallbackQueryHandler(select_alert_op, pattern='^alertop_'))
     app.add_handler(CallbackQueryHandler(clear_alert, pattern='^clearalert_'))
@@ -574,11 +567,11 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # شروع چک قیمت
+    # --- شروع چک قیمت ---
     app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
 
-    # --- Flask برای Health Check (روی پورت اصلی) ---
-    from flask import Flask
+    # --- Flask برای /health و /TOKEN ---
+    from flask import Flask, request
     import threading
 
     flask_app = Flask(__name__)
@@ -591,28 +584,35 @@ if __name__ == '__main__':
         except Exception as e:
             return f'Redis Down: {str(e)}', 500
 
-    # --- تنظیمات وب‌هوک تلگرام ---
-    PORT = int(os.environ.get("PORT", 10000))
-    DOMAIN = os.environ.get("RENDER_EXTERNAL_URL", "localhost").lstrip("https://").lstrip("http://")
-    WEBHOOK_URL = f"https://{DOMAIN}/{TOKEN}"
-    logger.info(f"ربات در حال اجراست: {WEBHOOK_URL}")
+    @flask_app.route(f'/{TOKEN}', methods=['POST'])
+    async def telegram_webhook():
+        json_data = request.get_data(as_text=True)
+        update = Update.de_json(json.loads(json_data), app.bot)
+        await app.process_update(update)
+        return 'OK'
 
-    # اجرای Flask در ترد جدا
     def run_flask():
+        PORT = int(os.environ.get("PORT", 10000))
         flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
+    # --- تنظیم Webhook تلگرام ---
+    async def set_webhook():
+        try:
+            await app.bot.set_webhook(url=WEBHOOK_URL)
+            logger.info(f"Webhook set: {WEBHOOK_URL}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+
+    # --- اجرای Flask در ترد اصلی ---
     threading.Thread(target=run_flask, daemon=True).start()
-    logger.info("Flask health server running on /health")
 
-    # اجرای وب‌هوک تلگرام
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TOKEN,
-        webhook_url=WEBHOOK_URL
-    )
+    # --- تنظیم webhook ---
+    asyncio.run(set_webhook())
 
-
-
-
-
+    # --- نگه داشتن برنامه زنده ---
+    logger.info("Bot is running... (24/7 on Render)")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
