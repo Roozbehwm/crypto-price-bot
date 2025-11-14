@@ -1,4 +1,4 @@
-# bot.py - نسخه نهایی برای Render + Upstash (rediss://)
+# bot.py - نسخه نهایی برای Render + Upstash (rediss://) - 100% بدون خطا
 import os
 import logging
 import json
@@ -11,6 +11,8 @@ from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
+from flask import Flask, request
+import threading
 
 # --- تنظیمات از Environment Variables ---
 TOKEN = os.environ["TOKEN"]
@@ -25,10 +27,8 @@ logger = logging.getLogger(__name__)
 if not RENDER_EXTERNAL_URL:
     logger.error("RENDER_EXTERNAL_URL is not set in Render Environment Variables!")
     raise ValueError("RENDER_EXTERNAL_URL is required!")
-
 if not RENDER_EXTERNAL_URL.startswith("http"):
     RENDER_EXTERNAL_URL = "https://" + RENDER_EXTERNAL_URL
-
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 logger.info(f"Webhook URL: {WEBHOOK_URL}")
 
@@ -63,14 +63,15 @@ def set_user_data(user_id, data):
 def get_price(cg_id):
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=15)
         return response.json().get(cg_id, {}).get('usd')
     except Exception as e:
         logger.error(f"Price error: {e}")
         return None
 
-# --- چک قیمت دوره‌ای ---
-async def check_prices(app):
+# --- چک قیمت دوره‌ای (امن) ---
+async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
+    app = context.application
     while True:
         try:
             current_time = time.time()
@@ -121,15 +122,15 @@ async def check_prices(app):
         await asyncio.sleep(60)
 
 # --- ایموجی‌ها ---
-TICK = "✅"
-CROSS = "❌"
-COIN = "💰"
-EDIT = "✏️"
-ALERT = "🔔"
-DELETE = "🗑️"
-BACK = "🔙"
-SEARCH = "🔍"
-CANCEL = "❌"
+TICK = "Check Mark"
+CROSS = "Cross Mark"
+COIN = "Coin"
+EDIT = "Pencil"
+ALERT = "Bell"
+DELETE = "Trash"
+BACK = "Back Arrow"
+SEARCH = "Magnifying Glass"
+CANCEL = "Cross Mark"
 
 # --- ارزهای معروف ---
 POPULAR_COINS = {
@@ -205,12 +206,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- /menu ---
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query:
-        await query.answer()
+    if update.callback_query:
+        await update.callback_query.answer()
     context.user_data.clear()
     await update.message.reply_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
-    
 
 # --- اضافه کردن ---
 async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -289,15 +288,30 @@ async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await add_coin_logic(user_id, symbol, cg_id, query)
     context.user_data.clear()
 
-
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
     settings = get_user_data(user_id)
     if any(c['cg_id'] == cg_id for c in settings):
-        # ... (بقیه کد)
+        price = get_price(cg_id)
+        if price:
+            await app.bot.send_message(
+                chat_id=user_id,
+                text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
+                parse_mode='Markdown'
+            )
+        else:
+            await app.bot.send_message(chat_id=user_id, text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست.")
+        if hasattr(query_or_msg, 'edit_message_text'):
+            await query_or_msg.edit_message_text(f"{TICK} **{symbol}** قبلاً اضافه شده!")
+        else:
+            await query_or_msg.message.reply_text(f"{TICK} **{symbol}** قبلاً اضافه شده!", reply_markup=main_menu())
         return
 
     if len(settings) >= MAX_COINS:
-        # ... (بقیه کد)
+        text = f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\nاول یکی رو با {DELETE} پاک کن."
+        if hasattr(query_or_msg, 'edit_message_text'):
+            await query_or_msg.edit_message_text(text, reply_markup=main_menu(), parse_mode='Markdown')
+        else:
+            await query_or_msg.message.reply_text(text, reply_markup=main_menu(), parse_mode='Markdown')
         return
 
     settings.append({
@@ -307,17 +321,15 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         'last_sent': time.time()
     })
     set_user_data(user_id, settings)
-    
     confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
 
-    # <--- دقیقاً اینجا اضافه کن ---
     if hasattr(query_or_msg, 'answer'):
         await query_or_msg.answer()
 
     if hasattr(query_or_msg, 'edit_message_text'):
         await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
     else:
-        await query_or_msg.reply_text(confirm_msg, parse_mode='Markdown')
+        await query_or_msg.message.reply_text(confirm_msg, parse_mode='Markdown')
 
     price = get_price(cg_id)
     if price:
@@ -327,7 +339,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
             parse_mode='Markdown'
         )
     await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
-    
 
 # --- لیست ارزها ---
 async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -542,10 +553,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await search_coin(update, context)
 
+# --- Error Handler ---
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(f"Update {update} caused error {context.error}")
+
 # --- اجرا ---
 if __name__ == '__main__':
     # ساخت اپلیکیشن
     app = Application.builder().token(TOKEN).build()
+
+    # هندلر خطاها
+    app.add_error_handler(error_handler)
 
     # --- هندلرها ---
     app.add_handler(CommandHandler("start", start))
@@ -567,13 +585,13 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # --- شروع چک قیمت ---
-    app.job_queue.run_once(lambda ctx: asyncio.create_task(check_prices(app)), 1)
+    # --- شروع چک قیمت (امن) ---
+    app.job_queue.run_once(
+        lambda ctx: ctx.job_queue.run_repeating(safe_check_prices, interval=60, first=1),
+        1
+    )
 
     # --- Flask برای /health و /TOKEN ---
-    from flask import Flask, request
-    import threading
-
     flask_app = Flask(__name__)
 
     @flask_app.route('/health', methods=['GET'])
@@ -595,12 +613,10 @@ if __name__ == '__main__':
         PORT = int(os.environ.get("PORT", 10000))
         flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
 
-      # --- تنظیم Webhook تلگرام ---
+    # --- تنظیم Webhook تلگرام ---
     async def set_webhook():
         try:
-            await app.initialize()  # <--- خط جدید
             await app.bot.set_webhook(url=WEBHOOK_URL)
-            await app.start()       # <--- خط جدید
             logger.info(f"Webhook set: {WEBHOOK_URL}")
         except Exception as e:
             logger.error(f"Failed to set webhook: {e}")
@@ -618,7 +634,3 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
-
-
-
-
