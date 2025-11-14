@@ -826,24 +826,22 @@ if __name__ == '__main__':
             asyncio.set_event_loop(loop)
             loop.run_until_complete(run_checker())
         
-        # --- ۱. Flask رو در ترد جدا شروع کن ---
-        flask_thread = threading.Thread(target=run_flask, daemon=False)
-        flask_thread.start()
-        
-        # ۲. Webhook تلگرام رو تنظیم کن
-        asyncio.run(set_webhook())
-        
-        # ۳. چک قیمت رو در ترد جدا شروع کن
-        checker_thread = threading.Thread(target=start_price_checker, daemon=False)
-        checker_thread.start()
-                
-        # --- ۴. برنامه رو زنده نگه دار ---
-        logger.info("Bot is running... (24/7 on Render)")
-        try:
-            while True:
-                time.sleep(3600)
-        except KeyboardInterrupt:
-            logger.info("Shutting down...")
+             # --- اجرای نهایی (برای Render) ---
+            flask_thread = threading.Thread(target=run_flask, daemon=True)
+            flask_thread.start()
+            
+            asyncio.run(set_webhook())
+            
+            checker_thread = threading.Thread(target=start_price_checker, daemon=True)
+            checker_thread.start()
+            
+            logger.info("Bot is running... (24/7 on Render)")
+            try:
+                while True:
+                    time.sleep(3600)
+            except KeyboardInterrupt:
+                logger.info("Shutting down...")
+
 
 
 
