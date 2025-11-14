@@ -71,7 +71,7 @@ def get_price(cg_id):
 
 # --- چک قیمت دوره‌ای (امن) ---
 async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
-    app = context.application
+    bot = context.application.bot
     while True:
         try:
             current_time = time.time()
@@ -90,12 +90,9 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                         period_seconds = item['period'] * 60
                         if current_time - last_sent < period_seconds:
                             continue
+
                         if 'alert' not in item:
-                            message = (
-                                f"قیمت لحظه‌ای\n\n"
-                                f"**نام ارز:** `{item['symbol']}`\n"
-                                f"**قیمت:** `${price:,.2f}`"
-                            )
+                            message = f"قیمت لحظه‌ای\n\n**نام ارز:** `{item['symbol']}`\n**قیمت:** `${price:,.2f}`"
                         else:
                             op = item['alert']['op']
                             target = item['alert']['price']
@@ -103,14 +100,10 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                             if not condition:
                                 continue
                             op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
-                            message = (
-                                f"هشدار قیمت!\n\n"
-                                f"**نام ارز:** `{item['symbol']}`\n"
-                                f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
-                                f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
-                            )
+                            message = f"هشدار قیمت!\n\n**نام ارز:** `{item['symbol']}`\n**قیمت لحظه‌ای:** `${price:,.2f}`\n\n**شرط فعال شده:** {op_text} `${target:,.2f}`"
+
                         try:
-                            await app.bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
+                            await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
                             item['last_sent'] = current_time
                         except Exception as send_e:
                             logger.warning(f"Send error to {user_id}: {send_e}")
@@ -120,6 +113,7 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Check prices error: {e}")
         await asyncio.sleep(60)
+        
 
 # --- ایموجی‌ها ---
 TICK = "✅"
@@ -293,13 +287,16 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
     if any(c['cg_id'] == cg_id for c in settings):
         price = get_price(cg_id)
         if price:
-            await app.bot.send_message(
+            await query_or_msg.message.bot.send_message(
                 chat_id=user_id,
                 text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
                 parse_mode='Markdown'
             )
         else:
-            await app.bot.send_message(chat_id=user_id, text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست.")
+            await query_or_msg.message.bot.send_message(
+                chat_id=user_id,
+                text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست."
+            )
         if hasattr(query_or_msg, 'edit_message_text'):
             await query_or_msg.edit_message_text(f"{TICK} **{symbol}** قبلاً اضافه شده!")
         else:
@@ -333,12 +330,17 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
 
     price = get_price(cg_id)
     if price:
-        await app.bot.send_message(
+        await query_or_msg.message.bot.send_message(
             chat_id=user_id,
             text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
             parse_mode='Markdown'
         )
-    await app.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
+    await query_or_msg.message.bot.send_message(
+        chat_id=user_id,
+        text=f"{BACK} منوی اصلی:",
+        reply_markup=main_menu()
+    )
+    
 
 # --- لیست ارزها ---
 async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -603,11 +605,15 @@ if __name__ == '__main__':
             return f'Redis Down: {str(e)}', 500
 
     @flask_app.route(f'/{TOKEN}', methods=['POST'])
-    async def telegram_webhook():
+async def telegram_webhook():
+    try:
         json_data = request.get_data(as_text=True)
         update = Update.de_json(json.loads(json_data), app.bot)
         await app.process_update(update)
         return 'OK'
+    except Exception as e:
+        logger.error(f"Webhook error: {e}")
+        return 'Error', 500
 
     def run_flask():
         PORT = int(os.environ.get("PORT", 10000))
@@ -634,4 +640,5 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
