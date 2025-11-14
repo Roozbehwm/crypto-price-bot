@@ -275,7 +275,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await query.edit_message_text(f"{CANCEL} عملیات لغو شد.", reply_markup=main_menu())
+
+    await context.application.bot.edit_message_text(
+        chat_id=query.from_user.id,
+        message_id=query.message.message_id,
+        text=f"{CANCEL} عملیات لغو شد.",
+        reply_markup=main_menu()
+    )
 
 async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -521,22 +527,36 @@ async def remove_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             new_settings.append(item)
     set_user_data(user_id, new_settings)
-    await query.edit_message_text(f"{DELETE} `{removed_symbol}` حذف شد.", reply_markup=main_menu(), parse_mode='Markdown')
+    
 
+    # استفاده از bot به جای query.edit_message_text
+    await context.application.bot.edit_message_text(
+        chat_id=user_id,
+        message_id=query.message.message_id,
+        text=f"{DELETE} `{removed_symbol}` حذف شد.",
+        reply_markup=main_menu(),
+        parse_mode='Markdown'
+    )
+    
 # --- راهنما ---
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await query.edit_message_text(
-        f"**راهنمای کامل**\n\n"
-        f"{COIN} **دکمه‌های معروف**: BTC, ETH, ...\n"
-        f"{SEARCH} **جستجو**: هر ارزی رو تایپ کن\n"
-        f"{TICK} **قیمت فوری**: بعد از اضافه کردن\n"
-        f"هر **۱۵ دقیقه** قیمت میاد\n"
-        f"{EDIT} **ویرایش**: زمان + هشدار\n"
-        f"حداکثر **{MAX_COINS} ارز**\n"
-        f"ساده و حرفه‌ای",
+
+    await context.application.bot.edit_message_text(
+        chat_id=query.from_user.id,
+        message_id=query.message.message_id,
+        text=(
+            f"**راهنمای کامل**\n\n"
+            f"{COIN} **دکمه‌های معروف**: BTC, ETH, ...\n"
+            f"{SEARCH} **جستجو**: هر ارزی رو تایپ کن\n"
+            f"{TICK} **قیمت فوری**: بعد از اضافه کردن\n"
+            f"هر **۱۵ دقیقه** قیمت میاد\n"
+            f"{EDIT} **ویرایش**: زمان + هشدار\n"
+            f"حداکثر **{MAX_COINS} ارز**\n"
+            f"ساده و حرفه‌ای"
+        ),
         reply_markup=main_menu(),
         parse_mode='Markdown'
     )
@@ -546,7 +566,14 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await query.edit_message_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
+
+    await context.application.bot.edit_message_text(
+        chat_id=query.from_user.id,
+        message_id=query.message.message_id,
+        text=f"{BACK} منوی اصلی:",
+        reply_markup=main_menu()
+    )
+    
 
 # --- هندلر متن ---
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -648,6 +675,7 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
 
