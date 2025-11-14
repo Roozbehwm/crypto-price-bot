@@ -236,7 +236,7 @@ async def select_popular(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     symbol = query.data.split('_')[2]
     cg_id, _ = POPULAR_COINS[symbol]
-    await add_coin_logic(user_id, symbol, cg_id, query)
+    await add_coin_logic(user_id, symbol, cg_id, query, context) 
     context.user_data.clear()
 
 async def search_coin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -286,7 +286,7 @@ async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("خطا در پردازش", show_alert=True)
         return
     _, cg_id, symbol = parts
-    await add_coin_logic(user_id, symbol, cg_id, query)
+    await add_coin_logic(user_id, symbol, cg_id, query, context)  
     context.user_data.clear()
 
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextTypes.DEFAULT_TYPE):
@@ -648,5 +648,6 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
