@@ -205,8 +205,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- /menu ---
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.callback_query:
-        await update.callback_query.answer()
+    query = update.callback_query
+    if query:
+        await query.answer()
     context.user_data.clear()
     await update.message.reply_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
     
@@ -288,30 +289,15 @@ async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await add_coin_logic(user_id, symbol, cg_id, query)
     context.user_data.clear()
 
+
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
     settings = get_user_data(user_id)
     if any(c['cg_id'] == cg_id for c in settings):
-        price = get_price(cg_id)
-        if price:
-            await app.bot.send_message(
-                chat_id=user_id,
-                text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
-                parse_mode='Markdown'
-            )
-        else:
-            await app.bot.send_message(chat_id=user_id, text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست.")
-        if hasattr(query_or_msg, 'edit_message_text'):
-            await query_or_msg.edit_message_text(f"{TICK} **{symbol}** قبلاً اضافه شده!")
-        else:
-            await query_or_msg.reply_text(f"{TICK} **{symbol}** قبلاً اضافه شده!", reply_markup=main_menu())
+        # ... (بقیه کد)
         return
 
     if len(settings) >= MAX_COINS:
-        text = f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\nاول یکی رو با {DELETE} پاک کن."
-        if hasattr(query_or_msg, 'edit_message_text'):
-            await query_or_msg.edit_message_text(text, reply_markup=main_menu(), parse_mode='Markdown')
-        else:
-            await query_or_msg.reply_text(text, reply_markup=main_menu(), parse_mode='Markdown')
+        # ... (بقیه کد)
         return
 
     settings.append({
@@ -321,10 +307,12 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         'last_sent': time.time()
     })
     set_user_data(user_id, settings)
+    
     confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
 
+    # <--- دقیقاً اینجا اضافه کن ---
     if hasattr(query_or_msg, 'answer'):
-        await query_or_msg.answer()  # <--- اضافه کن
+        await query_or_msg.answer()
 
     if hasattr(query_or_msg, 'edit_message_text'):
         await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
@@ -630,6 +618,7 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
 
