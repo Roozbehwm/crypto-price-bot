@@ -215,7 +215,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- اضافه کردن ---
 async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     context.user_data.clear()
     keyboard = []
     row = []
@@ -229,21 +228,36 @@ async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton(f"{SEARCH} جستجوی پیشرفته", callback_data='search_coin')])
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data='back')])
 
+    # ۱. ویرایش پیام
     await context.application.bot.edit_message_text(
         chat_id=query.from_user.id,
         message_id=query.message.message_id,
         text="ارز رو انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    
+
+    # ۲. چرخ‌دنده رو ببند
+    await query.answer()
+  
 async def select_popular(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     symbol = query.data.split('_')[2]
     cg_id, _ = POPULAR_COINS[symbol]
-    await add_coin_logic(user_id, symbol, cg_id, query, context) 
-    context.user_data.clear()
+
+    # ۱. پیام رو ویرایش کن (چرخ‌دنده شروع می‌شه)
+    await context.application.bot.edit_message_text(
+        chat_id=user_id,
+        message_id=query.message.message_id,
+        text=f"{TICK} در حال اضافه کردن **{symbol}**...",
+        parse_mode='Markdown'
+    )
+
+    # ۲. اضافه کردن
+    await add_coin_logic(user_id, symbol, cg_id, query, context)
+
+    # ۳. چرخ‌دنده رو ببند (فقط یکبار)
+    await query.answer()
 
 async def search_coin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -291,15 +305,26 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     parts = query.data.split('|')
     if len(parts) != 3:
         await query.answer("خطا در پردازش", show_alert=True)
         return
     _, cg_id, symbol = parts
-    await add_coin_logic(user_id, symbol, cg_id, query, context)  
-    context.user_data.clear()
+
+    # ۱. پیام رو ویرایش کن
+    await context.application.bot.edit_message_text(
+        chat_id=user_id,
+        message_id=query.message.message_id,
+        text=f"{TICK} در حال اضافه کردن **{symbol}**...",
+        parse_mode='Markdown'
+    )
+
+    # ۲. اضافه کردن
+    await add_coin_logic(user_id, symbol, cg_id, query, context)
+
+    # ۳. چرخ‌دنده رو ببند
+    await query.answer()
 
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextTypes.DEFAULT_TYPE):
     settings = get_user_data(user_id)
@@ -339,8 +364,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextT
     set_user_data(user_id, settings)
     confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
 
-    if hasattr(query_or_msg, 'answer'):
-        await query_or_msg.answer()
 
     if hasattr(query_or_msg, 'edit_message_text'):
         await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
@@ -363,13 +386,19 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextT
 # --- لیست ارزها ---
 async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     context.user_data.clear()
     settings = get_user_data(user_id)
     if not settings:
-        await query.edit_message_text(f"{CROSS} هیچ ارزی نداری! از منو اضافه کن.", reply_markup=main_menu())
+        await context.application.bot.edit_message_text(
+            chat_id=user_id,
+            message_id=query.message.message_id,
+            text=f"{CROSS} هیچ ارزی نداری! از منو اضافه کن.",
+            reply_markup=main_menu()
+        )
+        await query.answer()
         return
+
     keyboard = []
     for item in settings:
         symbol = item['symbol']
@@ -385,7 +414,14 @@ async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton(f"{DELETE}", callback_data=f"remove_{cg_id}")
         ])
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data='back')])
-    await query.edit_message_text(f"{SEARCH} ارزهایت ({len(settings)}/{MAX_COINS}):", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    await context.application.bot.edit_message_text(
+        chat_id=user_id,
+        message_id=query.message.message_id,
+        text=f"{SEARCH} ارزهایت ({len(settings)}/{MAX_COINS}):",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    await query.answer()
 
 # --- ویرایش ---
 async def edit_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -521,7 +557,6 @@ async def clear_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def remove_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     user_id = query.from_user.id
     cg_id = query.data.split('_')[1]
     settings = get_user_data(user_id)
@@ -533,9 +568,7 @@ async def remove_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             new_settings.append(item)
     set_user_data(user_id, new_settings)
-    
 
-    # استفاده از bot به جای query.edit_message_text
     await context.application.bot.edit_message_text(
         chat_id=user_id,
         message_id=query.message.message_id,
@@ -543,6 +576,7 @@ async def remove_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu(),
         parse_mode='Markdown'
     )
+    await query.answer()
     
 # --- راهنما ---
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -570,7 +604,6 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- برگشت ---
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     context.user_data.clear()
 
     await context.application.bot.edit_message_text(
@@ -579,6 +612,7 @@ async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text=f"{BACK} منوی اصلی:",
         reply_markup=main_menu()
     )
+    await query.answer()
     
 
 # --- هندلر متن ---
@@ -681,6 +715,7 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
 
