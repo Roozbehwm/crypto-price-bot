@@ -340,7 +340,6 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg):
         text=f"{BACK} منوی اصلی:",
         reply_markup=main_menu()
     )
-    
 
 # --- لیست ارزها ---
 async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -642,5 +641,6 @@ async def telegram_webhook():
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
