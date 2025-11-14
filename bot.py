@@ -204,12 +204,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # --- /menu ---
-
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query  
-    await query.answer()          
+    if update.callback_query:
+        await update.callback_query.answer()
     context.user_data.clear()
     await update.message.reply_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
+    
 
 # --- اضافه کردن ---
 async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -630,5 +630,6 @@ if __name__ == '__main__':
             time.sleep(3600)
     except KeyboardInterrupt:
         logger.info("Shutting down...")
+
 
 
