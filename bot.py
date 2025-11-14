@@ -813,14 +813,16 @@ if __name__ == '__main__':
             loop.run_until_complete(run_checker())
         
         # --- ۱. Flask رو در ترد جدا شروع کن ---
-        threading.Thread(target=run_flask, daemon=True).start()
+        flask_thread = threading.Thread(target=run_flask, daemon=False)
+        flask_thread.start()
         
-        # --- ۲. Webhook تلگرام رو تنظیم کن ---
+        # ۲. Webhook تلگرام رو تنظیم کن
         asyncio.run(set_webhook())
         
-        # --- ۳. چک قیمت رو در ترد جدا شروع کن ---
-        threading.Thread(target=start_price_checker, daemon=True).start()
-        
+        # ۳. چک قیمت رو در ترد جدا شروع کن
+        checker_thread = threading.Thread(target=start_price_checker, daemon=False)
+        checker_thread.start()
+                
         # --- ۴. برنامه رو زنده نگه دار ---
         logger.info("Bot is running... (24/7 on Render)")
         try:
@@ -828,7 +830,7 @@ if __name__ == '__main__':
                 time.sleep(3600)
         except KeyboardInterrupt:
             logger.info("Shutting down...")
-        
+
 
 
 
