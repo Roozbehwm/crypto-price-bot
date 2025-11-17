@@ -5,14 +5,14 @@ import time
 import asyncio
 import requests
 import redis
+import threading
+from asyncio import run_coroutine_threadsafe
+from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     ContextTypes, MessageHandler, filters
 )
-from flask import Flask, request
-import threading
-from asyncio import run_coroutine_threadsafe  # این خط حیاتی بود!
 
 # --- تنظیمات ---
 TOKEN = os.environ["TOKEN"]
@@ -29,6 +29,7 @@ if not RENDER_EXTERNAL_URL:
     raise ValueError("RENDER_EXTERNAL_URL is required!")
 if not RENDER_EXTERNAL_URL.startswith("http"):
     RENDER_EXTERNAL_URL = "https://" + RENDER_EXTERNAL_URL
+
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 logger.info(f"Webhook URL: {WEBHOOK_URL}")
 
@@ -58,6 +59,7 @@ def get_price(cg_id):
             return json.loads(cached)['price']
     except:
         pass
+
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
         headers = {"User-Agent": "CryptoBot/1.0"}
@@ -73,6 +75,7 @@ def get_price(cg_id):
             return price
     except:
         pass
+
     try:
         cached = r.get(cache_key)
         if cached:
@@ -90,6 +93,7 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
             keys = r.keys("user:*")
             unique_cg_ids = set()
             all_settings = {}
+
             for key in keys:
                 try:
                     user_id = int(key.split(":")[1])
@@ -99,6 +103,7 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                         unique_cg_ids.add(item['cg_id'])
                 except:
                     continue
+
             # Batch fetch
             if unique_cg_ids:
                 try:
@@ -114,6 +119,7 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                                 r.setex(f"price:{cg_id}", 55, json.dumps({"price": price}))
                 except:
                     pass
+
             # پردازش کاربران
             for user_id, settings in all_settings.items():
                 if not settings:
@@ -134,6 +140,7 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                         message = f"هشدار قیمت!\n\n**{item['symbol']}**: `${price:,.2f}`\n**شرط:** {op_text} `${target:,.2f}`"
                     else:
                         message = f"قیمت لحظه‌ای\n**{item['symbol']}**: `${price:,.2f}`"
+
                     try:
                         await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
                         item['last_sent'] = current_time
@@ -143,7 +150,7 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Price checker error: {e}")
         await asyncio.sleep(60)
-       
+
 # --- ایموجی‌ها ---
 TICK = "✅"
 CROSS = "❌"
@@ -154,6 +161,7 @@ DELETE = "🗑️"
 BACK = "🔙"
 SEARCH = "🔍"
 CANCEL = "❌"
+
 # --- ارزهای معروف ---
 POPULAR_COINS = {
     'BTC': ('bitcoin', 'Bitcoin'), 'ETH': ('ethereum', 'Ethereum'), 'BNB': ('binancecoin', 'BNB'),
@@ -162,6 +170,7 @@ POPULAR_COINS = {
     'VET': ('vechain', 'VeChain'), 'AAVE': ('aave', 'Aave'), 'TAO': ('bittensor', 'Bittensor'),
     'LINK': ('chainlink', 'Chainlink'), 'GALA': ('gala', 'Gala')
 }
+
 # --- همه ارزها ---
 ALL_COINS = {
     'BTC': 'bitcoin', 'ETH': 'ethereum', 'USDT': 'tether', 'BNB': 'binancecoin',
@@ -191,11 +200,13 @@ ALL_COINS = {
     'ZIL': 'zilliqa', 'QTUM': 'qtum', 'BTG': 'bitcoin-gold', 'RVN': 'ravencoin',
     'SC': 'siacoin', 'DGB': 'digibyte', 'XEM': 'nem', 'ZEN': 'horizen', 'SYS': 'syscoin'
 }
+
 MAX_COINS = 20
 TIME_OPTIONS = [
     (8 * 60, "۸ ساعت"), (12 * 60, "۱۲ ساعت"), (24 * 60, "۲۴ ساعت"),
     (36 * 60, "۳۶ ساعت"), (7 * 24 * 60, "هفته‌ای یکبار")
 ]
+
 # --- منو ---
 def main_menu():
     return InlineKeyboardMarkup([
@@ -203,7 +214,8 @@ def main_menu():
         [InlineKeyboardButton(f"{SEARCH} لیست ارزها", callback_data='list_coins')],
         [InlineKeyboardButton("راهنما کامل", callback_data='help')]
     ])
-# --- /start ---
+
+# --- هندلرها ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not r.exists(f"user:{user_id}"):
@@ -221,15 +233,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu(),
         parse_mode='Markdown'
     )
-# --- /menu ---
+
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
     context.user_data.clear()
-    await update.message.reply_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
-# --- اضافه کردن ---
+    text = f"{BACK} منوی اصلی:"
+    if update.message:
+        await update.message.reply_text(text, reply_markup=main_menu())
+    else:
+        await update.callback_query.edit_message_text(text, reply_markup=main_menu())
+
 async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     context.user_data.clear()
     keyboard = []
     row = []
@@ -242,43 +259,31 @@ async def add_coin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append(row)
     keyboard.append([InlineKeyboardButton(f"{SEARCH} جستجوی پیشرفته", callback_data='search_coin')])
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data='back')])
-    # ۱. ویرایش پیام
-    await context.application.bot.edit_message_text(
-        chat_id=query.from_user.id,
-        message_id=query.message.message_id,
+    await query.edit_message_text(
         text="ارز رو انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    # ۲. چرخ‌دنده رو ببند
-    await query.answer()
- 
+
 async def select_popular(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     symbol = query.data.split('_')[2]
     cg_id, _ = POPULAR_COINS[symbol]
-    # ۱. پیام رو ویرایش کن (چرخ‌دنده شروع می‌شه)
-    await context.application.bot.edit_message_text(
-        chat_id=user_id,
-        message_id=query.message.message_id,
-        text=f"{TICK} در حال اضافه کردن **{symbol}**...",
-        parse_mode='Markdown'
-    )
-    # ۲. اضافه کردن
+    await query.edit_message_text(f"{TICK} در حال اضافه کردن **{symbol}**...", parse_mode='Markdown')
     await add_coin_logic(user_id, symbol, cg_id, query, context)
-    # ۳. چرخ‌دنده رو ببند (فقط یکبار)
-    await query.answer()
+
 async def search_coin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data['state'] = 'search'
     keyboard = [[InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]]
     await query.edit_message_text(
-        f"{SEARCH} نام یا نماد ارز رو بنویس (مثلاً `BTC` یا `solana`):\n\n"
-        f"یا دکمه زیر رو بزن تا لغو کنی:",
+        f"{SEARCH} نام یا نماد ارز رو بنویس (مثلاً `BTC` یا `solana`):\n\nیا دکمه زیر رو بزن تا لغو کنی:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
+
 async def search_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     query_text = update.message.text.strip().lower()
@@ -298,35 +303,25 @@ async def search_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard.append([InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')])
     await update.message.reply_text(f"نتایج برای `{query_text}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
     context.user_data['state'] = 'awaiting_selection'
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await context.application.bot.edit_message_text(
-        chat_id=query.from_user.id,
-        message_id=query.message.message_id,
-        text=f"{CANCEL} عملیات لغو شد.",
-        reply_markup=main_menu()
-    )
+    await query.edit_message_text(f"{CANCEL} عملیات لغو شد.", reply_markup=main_menu())
+
 async def select_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     parts = query.data.split('|')
     if len(parts) != 3:
         await query.answer("خطا در پردازش", show_alert=True)
         return
     _, cg_id, symbol = parts
-    # ۱. پیام رو ویرایش کن
-    await context.application.bot.edit_message_text(
-        chat_id=user_id,
-        message_id=query.message.message_id,
-        text=f"{TICK} در حال اضافه کردن **{symbol}**...",
-        parse_mode='Markdown'
-    )
-    # ۲. اضافه کردن
+    await query.edit_message_text(f"{TICK} در حال اضافه کردن **{symbol}**...", parse_mode='Markdown')
     await add_coin_logic(user_id, symbol, cg_id, query, context)
-    # ۳. چرخ‌دنده رو ببند
-    await query.answer()
+
 async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextTypes.DEFAULT_TYPE):
     settings = get_user_data(user_id)
     if any(c['cg_id'] == cg_id for c in settings):
@@ -337,16 +332,12 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextT
                 text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
                 parse_mode='Markdown'
             )
-        else:
-            await context.application.bot.send_message(
-                chat_id=user_id,
-                text=f"{CROSS} قیمت **{symbol}** موقتاً در دسترس نیست."
-            )
         if hasattr(query_or_msg, 'edit_message_text'):
             await query_or_msg.edit_message_text(f"{TICK} **{symbol}** قبلاً اضافه شده!")
         else:
             await query_or_msg.message.reply_text(f"{TICK} **{symbol}** قبلاً اضافه شده!", reply_markup=main_menu())
         return
+
     if len(settings) >= MAX_COINS:
         text = f"{CROSS} **حداکثر {MAX_COINS} ارز می‌تونی داشته باشی!**\nاول یکی رو با {DELETE} پاک کن."
         if hasattr(query_or_msg, 'edit_message_text'):
@@ -354,6 +345,7 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextT
         else:
             await query_or_msg.message.reply_text(text, reply_markup=main_menu(), parse_mode='Markdown')
         return
+
     settings.append({
         'symbol': symbol,
         'cg_id': cg_id,
@@ -361,11 +353,12 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextT
         'last_sent': time.time()
     })
     set_user_data(user_id, settings)
-    confirm_msg = f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری."
+
     if hasattr(query_or_msg, 'edit_message_text'):
-        await query_or_msg.edit_message_text(confirm_msg, parse_mode='Markdown')
+        await query_or_msg.edit_message_text(f"{TICK} **{symbol}** با موفقیت اضافه شد!\nهر **۱۵ دقیقه** قیمت برات میاد.\n{EDIT} می‌تونی زمان یا {ALERT} هشدار بذاری.", parse_mode='Markdown')
     else:
-        await query_or_msg.message.reply_text(confirm_msg, parse_mode='Markdown')
+        await query_or_msg.message.reply_text(f"{TICK} **{symbol}** با موفقیت اضافه شد!", parse_mode='Markdown')
+
     price = get_price(cg_id)
     if price:
         await context.application.bot.send_message(
@@ -373,26 +366,18 @@ async def add_coin_logic(user_id, symbol, cg_id, query_or_msg, context: ContextT
             text=f"{COIN} قیمت لحظه‌ای\n\n**نام ارز:** `{symbol}`\n**قیمت:** `${price:,.2f}`",
             parse_mode='Markdown'
         )
-    await context.application.bot.send_message(
-        chat_id=user_id,
-        text=f"{BACK} منوی اصلی:",
-        reply_markup=main_menu()
-    )
-# --- لیست ارزها ---
+    await context.application.bot.send_message(chat_id=user_id, text=f"{BACK} منوی اصلی:", reply_markup=main_menu())
+
 async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     context.user_data.clear()
     settings = get_user_data(user_id)
     if not settings:
-        await context.application.bot.edit_message_text(
-            chat_id=user_id,
-            message_id=query.message.message_id,
-            text=f"{CROSS} هیچ ارزی نداری! از منو اضافه کن.",
-            reply_markup=main_menu()
-        )
-        await query.answer()
+        await query.edit_message_text(f"{CROSS} هیچ ارزی نداری! از منو اضافه کن.", reply_markup=main_menu())
         return
+
     keyboard = []
     for item in settings:
         symbol = item['symbol']
@@ -408,14 +393,11 @@ async def list_coins(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton(f"{DELETE}", callback_data=f"remove_{cg_id}")
         ])
     keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data='back')])
-    await context.application.bot.edit_message_text(
-        chat_id=user_id,
-        message_id=query.message.message_id,
+    await query.edit_message_text(
         text=f"{SEARCH} ارزهایت ({len(settings)}/{MAX_COINS}):",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    await query.answer()
-# --- ویرایش ---
+
 async def edit_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -426,15 +408,14 @@ async def edit_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not item:
         await query.edit_message_text(f"{CROSS} خطا: ارز پیدا نشد!", reply_markup=main_menu())
         return
-    symbol = item['symbol']
     keyboard = [
         [InlineKeyboardButton(f"{EDIT} تغییر زمان", callback_data=f"time_{cg_id}")],
         [InlineKeyboardButton(f"{ALERT} تنظیم هشدار", callback_data=f"alert_{cg_id}")],
         [InlineKeyboardButton(f"{CROSS} حذف هشدار", callback_data=f"clearalert_{cg_id}") if 'alert' in item else InlineKeyboardButton(" ", callback_data='none')],
         [InlineKeyboardButton(f"{BACK} برگشت", callback_data='list_coins')]
     ]
-    await query.edit_message_text(f"{EDIT} ویرایش `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-# --- تنظیم زمان ---
+    await query.edit_message_text(f"{EDIT} ویرایش `{item['symbol']}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+
 async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -445,8 +426,9 @@ async def set_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = []
     for mins, label in TIME_OPTIONS:
         keyboard.append([InlineKeyboardButton(label, callback_data=f"settime_{cg_id}_{mins}")])
-    keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f"edit_{cg_id}")]) # درست شد
+    keyboard.append([InlineKeyboardButton(f"{BACK} برگشت", callback_data=f"edit_{cg_id}")])
     await query.edit_message_text(f"{EDIT} زمان `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+
 async def save_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -455,17 +437,15 @@ async def save_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cg_id = parts[1]
     mins = int(parts[2])
     settings = get_user_data(user_id)
-    item = None
     for i in settings:
         if i['cg_id'] == cg_id:
             i['period'] = mins
             i['last_sent'] = time.time()
-            item = i
             break
     set_user_data(user_id, settings)
     time_label = next((t[1] for t in TIME_OPTIONS if t[0] == mins), f"هر {mins} دقیقه")
-    await query.edit_message_text(f"{TICK} زمان `{item['symbol']}` به **{time_label}** تغییر کرد.", reply_markup=main_menu(), parse_mode='Markdown')
-# --- تنظیم هشدار ---
+    await query.edit_message_text(f"{TICK} زمان `{i['symbol']}` به **{time_label}** تغییر کرد.", reply_markup=main_menu(), parse_mode='Markdown')
+
 async def set_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -479,6 +459,7 @@ async def set_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]
     ]
     await query.edit_message_text(f"{ALERT} هشدار `{symbol}`:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+
 async def select_alert_op(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -489,21 +470,20 @@ async def select_alert_op(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['temp_alert'] = {'cg_id': cg_id, 'op': op}
     context.user_data['state'] = 'alert_price'
     keyboard = [[InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]]
-    await app.bot.send_message(
+    await context.application.bot.send_message(
         chat_id=user_id,
-        text=f"{ALERT} مبلغ مورد نظر را به صورت عددی وارد کنید (مثلاً 10000 یا 10000.50):\n\n`{op}` X\n\n"
-             f"یا دکمه زیر رو بزن تا لغو کنی:",
+        text=f"{ALERT} مبلغ مورد نظر را به صورت عددی وارد کنید (مثلاً 10000 یا 10000.50):\n\n`{op}` X\n\nیا دکمه زیر رو بزن تا لغو کنی:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='Markdown'
     )
+
 async def save_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     text = update.message.text.strip().replace(',', '')
     try:
         price = float(text)
     except ValueError:
-        keyboard = [[InlineKeyboardButton(f"{CANCEL} لغو", callback_data='cancel')]]
-        await update.message.reply_text(f"{CROSS} فقط عدد معتبر وارد کنید (مثلاً 10000 یا 10000.50)!", reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_text(f"{CROSS} فقط عدد معتبر وارد کنید (مثلاً 10000 یا 10000.50)!")
         return
     temp = context.user_data.get('temp_alert')
     if not temp:
@@ -513,63 +493,51 @@ async def save_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     op = temp['op']
     op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
     settings = get_user_data(user_id)
-    item = None
     for i in settings:
         if i['cg_id'] == cg_id:
             i['alert'] = {'op': op, 'price': price}
-            item = i
             break
     set_user_data(user_id, settings)
     context.user_data.clear()
     await update.message.reply_text(
-        f"{TICK} هشدار `{item['symbol']}` تنظیم شد:\n{op_text} **${price:,.2f}**",
+        f"{TICK} هشدار `{i['symbol']}` تنظیم شد:\n{op_text} **${price:,.2f}**",
         reply_markup=main_menu(),
         parse_mode='Markdown'
     )
+
 async def clear_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     cg_id = query.data.split('_')[1]
     settings = get_user_data(user_id)
-    item = None
     for i in settings:
         if i['cg_id'] == cg_id and 'alert' in i:
             del i['alert']
-            item = i
-            break
-    set_user_data(user_id, settings)
-    await query.edit_message_text(f"{CROSS} هشدار `{item['symbol']}` حذف شد.", reply_markup=main_menu(), parse_mode='Markdown')
+            await query.edit_message_text(f"{CROSS} هشدار `{i['symbol']}` حذف شد.", reply_markup=main_menu(), parse_mode='Markdown')
+            set_user_data(user_id, settings)
+            return
+
 async def remove_coin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     user_id = query.from_user.id
     cg_id = query.data.split('_')[1]
     settings = get_user_data(user_id)
     removed_symbol = "؟"
-    new_settings = []
+    new_settings = [item for item in settings if item['cg_id'] != cg_id]
     for item in settings:
         if item['cg_id'] == cg_id:
             removed_symbol = item['symbol']
-        else:
-            new_settings.append(item)
+            break
     set_user_data(user_id, new_settings)
-    await context.application.bot.edit_message_text(
-        chat_id=user_id,
-        message_id=query.message.message_id,
-        text=f"{DELETE} `{removed_symbol}` حذف شد.",
-        reply_markup=main_menu(),
-        parse_mode='Markdown'
-    )
-    await query.answer()
-   
-# --- راهنما ---
+    await query.edit_message_text(f"{DELETE} `{removed_symbol}` حذف شد.", reply_markup=main_menu(), parse_mode='Markdown')
+
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await context.application.bot.edit_message_text(
-        chat_id=query.from_user.id,
-        message_id=query.message.message_id,
+    await query.edit_message_text(
         text=(
             f"**راهنمای کامل**\n\n"
             f"{COIN} **دکمه‌های معروف**: BTC, ETH, ...\n"
@@ -583,19 +551,13 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=main_menu(),
         parse_mode='Markdown'
     )
-# --- برگشت ---
+
 async def back_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    context.user_data.clear()
-    await context.application.bot.edit_message_text(
-        chat_id=query.from_user.id,
-        message_id=query.message.message_id,
-        text=f"{BACK} منوی اصلی:",
-        reply_markup=main_menu()
-    )
     await query.answer()
-   
-# --- هندلر متن ---
+    context.user_data.clear()
+    await query.edit_message_text(f"{BACK} منوی اصلی:", reply_markup=main_menu())
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get('state')
     if state == 'alert_price':
@@ -607,98 +569,82 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
     else:
         await search_coin(update, context)
-# --- Error Handler ---
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Update {update} caused error {context.error}")
-# --- اجرا ---
-if __name__ == '__main__':
-    # --- ساخت اپلیکیشن (فقط یک بار) ---
-    app = Application.builder().token(TOKEN).build()
-    app.add_error_handler(error_handler)
-    # --- هندلرها ---
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu))
-    app.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
-    app.add_handler(CallbackQueryHandler(select_popular, pattern='^select_pop_'))
-    app.add_handler(CallbackQueryHandler(search_coin_start, pattern='^search_coin$'))
-    app.add_handler(CallbackQueryHandler(cancel, pattern='^cancel$'))
-    app.add_handler(CallbackQueryHandler(select_search, pattern=r'^select_search\|'))
-    app.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
-    app.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
-    app.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
-    app.add_handler(CallbackQueryHandler(save_time, pattern='^settime_'))
-    app.add_handler(CallbackQueryHandler(set_alert, pattern='^alert_'))
-    app.add_handler(CallbackQueryHandler(select_alert_op, pattern='^alertop_'))
-    app.add_handler(CallbackQueryHandler(clear_alert, pattern='^clearalert_'))
-    app.add_handler(CallbackQueryHandler(remove_coin, pattern='^remove_'))
-    app.add_handler(CallbackQueryHandler(help_cmd, pattern='^help$'))
-    app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    # --- Flask ---
-  flask_app = Flask(__name__)
-    main_loop = None
-    
-    @flask_app.route('/health', methods=['GET'])
-    def health_check():
-        try:
-            r.ping()
-            return 'OK', 200
-        except:
-            return 'Redis Down', 500
-    
-    @flask_app.route(f'/{TOKEN}', methods=['POST'])
-    def telegram_webhook():
-        try:
-            update = Update.de_json(json.loads(request.get_data(as_text=True)), app.bot)
-            future = run_coroutine_threadsafe(app.process_update(update), main_loop)
-            future.result(timeout=15)
-            return 'OK', 200
-        except Exception as e:
-            logger.error(f"Webhook error: {e}", exc_info=True)
-            return 'Error', 500
-    
-    def run_flask():
+
+# --- Flask App ---
+flask_app = Flask(__name__)
+main_loop = None
+
+@flask_app.route('/health', methods=['GET'])
+def health_check():
+    try:
+        r.ping()
+        return 'OK', 200
+    except:
+        return 'Redis Down', 500
+
+@flask_app.route(f'/{TOKEN}', methods=['POST'])
+def telegram_webhook():
+    try:
+        update = Update.de_json(json.loads(request.get_data(as_text=True)), application.bot)
+        future = run_coroutine_threadsafe(application.process_update(update), main_loop)
+        future.result(timeout=15)
+        return 'OK', 200
+    except Exception as e:
+        logger.error(f"Webhook error: {e}", exc_info=True)
+        return 'Error', 500
+
+def run_flask():
     global main_loop
     main_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(main_loop)
     flask_app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)), use_reloader=False)
-    # --- Webhook (بدون initialize) ---
-    async def set_webhook():
-        try:
-            await app.bot.set_webhook(url=WEBHOOK_URL)
-            logger.info(f"Webhook set: {WEBHOOK_URL}")
-        except Exception as e:
-            logger.error(f"Failed to set webhook: {e}")
-    # --- چک قیمت (بدون initialize) ---
-    async def run_price_checker():
-        while True:
-            try:
-                ctx = ContextTypes.DEFAULT_TYPE(application=app)
-                await safe_check_prices(ctx)
-            except Exception as e:
-                logger.error(f"Price checker error: {e}")
-            await asyncio.sleep(60)
-    # --- اجرای اصلی ---
-    sync def run_price_checker():
-        ctx = ContextTypes.DEFAULT_TYPE(application=app)
-        while True:
-            await safe_check_prices(ctx)
-            await asyncio.sleep(60)
-    
-    async def main():
-        await app.initialize()
-        await app.bot.set_webhook(url=WEBHOOK_URL)
-        logger.info("Webhook فعال شد")
-        threading.Thread(target=run_flask, daemon=True).start()
-        asyncio.create_task(run_price_checker())
-        logger.info("ربات کاملاً فعال شد!")
-        while True:
-            await asyncio.sleep(3600)
-    
-    if __name__ == '__main__':
-        app = Application.builder().token(TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        # بقیه هندلرها رو هم اضافه کن (من برای کوتاه شدن حذف کردم، ولی تو کد اصلی‌ت همه‌شون هست)
-        asyncio.run(main())
 
+# --- اجرای اصلی ---
+async def main():
+    global application
+    application = Application.builder().token(TOKEN).build()
 
+    # هندلرها
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("menu", menu))
+    application.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
+    application.add_handler(CallbackQueryHandler(select_popular, pattern='^select_pop_'))
+    application.add_handler(CallbackQueryHandler(search_coin_start, pattern='^search_coin$'))
+    application.add_handler(CallbackQueryHandler(cancel, pattern='^cancel$'))
+    application.add_handler(CallbackQueryHandler(select_search, pattern=r'^select_search\|'))
+    application.add_handler(CallbackQueryHandler(list_coins, pattern='^list_coins$'))
+    application.add_handler(CallbackQueryHandler(edit_coin, pattern='^edit_'))
+    application.add_handler(CallbackQueryHandler(set_time, pattern='^time_'))
+    application.add_handler(CallbackQueryHandler(save_time, pattern='^settime_'))
+    application.add_handler(CallbackQueryHandler(set_alert, pattern='^alert_'))
+    application.add_handler(CallbackQueryHandler(select_alert_op, pattern='^alertop_'))
+    application.add_handler(CallbackQueryHandler(clear_alert, pattern='^clearalert_'))
+    application.add_handler(CallbackQueryHandler(remove_coin, pattern='^remove_'))
+    application.add_handler(CallbackQueryHandler(help_cmd, pattern='^help$'))
+    application.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    application.add_error_handler(error_handler)
+
+    await application.initialize()
+    await application.bot.set_webhook(url=WEBHOOK_URL)
+    logger.info(f"Webhook تنظیم شد: {WEBHOOK_URL}")
+
+    # راه‌اندازی Flask در ترد جدا
+    threading.Thread(target=run_flask, daemon=True).start()
+
+    # راه‌اندازی چک‌کننده قیمت
+    application.job_queue.run_repeating(
+        callback=safe_check_prices,
+        interval=60,
+        first=10
+    )
+
+    logger.info("ربات کاملاً فعال شد!")
+    while True:
+        await asyncio.sleep(3600)
+
+if __name__ == '__main__':
+    asyncio.run(main())
