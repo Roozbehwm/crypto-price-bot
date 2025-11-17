@@ -88,72 +88,107 @@ def get_price(cg_id):
     return None
 
 # --- چک قیمت دوره‌ای ---
-async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
-    bot = context.application.bot
+async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE = None):
+    """چک قیمت اتوماتیک — دقیقاً طبق زمان‌بندی هر کاربر (۱۵ دقیقه، ۸ ساعت، ۲۴ ساعت و ...)"""
+    try:
+        bot = application.bot
+        current_time = time.time()
+
+        # گرفتن همه کاربران
+        keys = r.keys("user:*")
+        if not keys:
+            return
+
+        all_cg_ids = set()
+        users_to_update = {}
+
+        for key in keys:
+            try:
+                user_id = int(key.split(":")[1])
+                raw = r.get(key)
+                if not raw:
+                    continue
+                settings = json.loads(raw)
+                users_to_update[user_id] = settings
+                for item in settings:
+                    all_cg_ids.add(item['cg_id'])
+            except:
+                continue
+
+        # فقط یک درخواست به CoinGecko برای همه ارزها
+        prices = {}
+        if all_cg_ids:
+            try:
+                ids_str = ','.join(all_cg_ids)
+                url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_str}&vs_currencies=usd"
+                resp = requests.get(url, headers={"User-Agent": "CryptoBot/1.0"}, timeout=12)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for cg_id in all_cg_ids:
+                        if cg_id in data and "usd" in data[cg_id]:
+                            prices[cg_id] = data[cg_id]["usd"]
+            except Exception as e:
+                logger.warning(f"Batch price fetch failed: {e}")
+
+        # پردازش هر کاربر و ارسال پیام
+        for user_id, settings in users_to_update.items():
+            for item in settings:
+                cg_id = item['cg_id']
+                symbol = item['symbol']
+                period_min = item.get('period', 15)  # پیش‌فرض ۱۵ دقیقه
+                last_sent = item.get('last_sent', 0)
+
+                # آیا زمان ارسال رسیده؟
+                if current_time - last_sent < period_min * 60:
+                    continue
+
+                # گرفتن قیمت
+                price = prices.get(cg_id)
+                if price is None:
+                    price = get_price(cg_id)  # fallback به کش
+                if not price:
+                    continue
+
+                # ساخت متن پیام
+                if 'alert' in item:
+                    op = item['alert']['op']
+                    target = item['alert']['price']
+                    if (op == '>=' and price < target) or (op == '<=' and price > target):
+                        continue
+                    op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
+                    text = f"⚠️ هشدار قیمت!\n\n**{symbol}**: `${price:,.2f}`\nشرط: {op_text} `${target:,.2f}`"
+                else:
+                    text = f"**{symbol}**: `${price:,.2f}`"
+
+                try:
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=text,
+                        parse_mode='Markdown',
+                        disable_web_page_preview=True
+                    )
+                    item['last_sent'] = current_time
+                    logger.info(f"قیمت ارسال شد به {user_id} - {symbol} - هر {period_min} دقیقه")
+                except Exception as e:
+                    logger.warning(f"ارسال پیام به {user_id} ناموفق: {e}")
+
+        # ذخیره last_sent های جدید
+        for user_id, settings in users_to_update.items():
+            set_user_data(user_id, settings)
+
+    except Exception as e:
+        logger.error(f"خطای کلی در safe_check_prices: {e}", exc_info=True)
+
+async def start_price_checker():
+    """هر ۱۰ دقیقه یکبار چک کن — کاملاً دقیق برای کاربران ۱۵ دقیقه‌ای"""
+    await asyncio.sleep(25)  # صبر تا وب‌هوک و همه چیز بالا بیاد
+    logger.info("شروع چک قیمت اتوماتیک هر ۱۰ دقیقه...")
     while True:
         try:
-            current_time = time.time()
-            keys = r.keys("user:*")
-            unique_cg_ids = set()
-            all_settings = {}
-
-            for key in keys:
-                try:
-                    user_id = int(key.split(":")[1])
-                    settings = get_user_data(user_id)
-                    all_settings[user_id] = settings
-                    for item in settings:
-                        unique_cg_ids.add(item['cg_id'])
-                except:
-                    continue
-
-            # Batch fetch
-            if unique_cg_ids:
-                try:
-                    ids = ','.join(unique_cg_ids)
-                    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
-                    headers = {"User-Agent": "CryptoBot/1.0"}
-                    resp = requests.get(url, headers=headers, timeout=10)
-                    if resp.status_code != 429:
-                        data = resp.json()
-                        for cg_id in unique_cg_ids:
-                            price = data.get(cg_id, {}).get("usd")
-                            if price is not None:
-                                r.setex(f"price:{cg_id}", 55, json.dumps({"price": price}))
-                except:
-                    pass
-
-            # پردازش کاربران
-            for user_id, settings in all_settings.items():
-                if not settings:
-                    continue
-                for item in settings[:]:
-                    price = get_price(item['cg_id'])
-                    if price is None:
-                        continue
-                    last_sent = item.get('last_sent', 0)
-                    if current_time - last_sent < item['period'] * 60:
-                        continue
-                    if 'alert' in item:
-                        op = item['alert']['op']
-                        target = item['alert']['price']
-                        if (op == '>=' and price < target) or (op == '<=' and price > target):
-                            continue
-                        op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
-                        message = f"هشدار قیمت!\n\n**{item['symbol']}**: `${price:,.2f}`\n**شرط:** {op_text} `${target:,.2f}`"
-                    else:
-                        message = f"قیمت لحظه‌ای\n**{item['symbol']}**: `${price:,.2f}`"
-
-                    try:
-                        await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
-                        item['last_sent'] = current_time
-                    except:
-                        pass
-                set_user_data(user_id, settings)
+            await safe_check_prices()
         except Exception as e:
-            logger.error(f"Price checker error: {e}")
-        await asyncio.sleep(60)
-
+            logger.error(f"خطا در start_price_checker: {e}")
+        await asyncio.sleep(600)  # ۶۰۰ ثانیه = ۱۰ دقیقه
 # --- ایموجی‌ها ---
 TICK = "✅"
 CROSS = "❌"
@@ -679,26 +714,23 @@ async def main():
     await application.bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook تنظیم شد: {WEBHOOK_URL}")
 
-    # اجرای Flask در ترد جدا
+    # راه‌اندازی Flask در ترد جدا
     Thread(target=run_flask, daemon=True).start()
-    logger.info("Flask server در ترد جدا شروع شد")
+    logger.info("سرور Flask شروع شد")
 
-    # چک قیمت هر ۶۰ ثانیه
-    application.job_queue.run_repeating(
-        callback=safe_check_prices,
-        interval=60,
-        first=10
-    )
-    logger.info("چک قیمت هر ۶۰ ثانیه فعال شد")
+    # راه‌اندازی چک قیمت اتوماتیک (به جای job_queue)
+    application.create_task(start_price_checker())
+    logger.info("چک قیمت اتوماتیک هر ۱۰ دقیقه فعال شد ✅")
 
-    logger.info("ربات کاملاً فعال شد و منتظر پیام‌هاست!")
+    logger.info("ربات کاملاً فعال شد و در حال اجراست!")
 
-    # نگه داشتن loop اصلی زنده (برای همیشه)
+    # نگه داشتن loop اصلی زنده
     while True:
         await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
