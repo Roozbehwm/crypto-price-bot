@@ -16,6 +16,7 @@ from telegram.ext import (
     ContextTypes, MessageHandler, filters
 )
 
+main_loop = None  
 # --- تنظیمات ---
 TOKEN = os.environ["TOKEN"]
 UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
@@ -588,30 +589,81 @@ def health_check():
 
 @flask_app.route(f'/{TOKEN}', methods=['POST'])
 def telegram_webhook():
+    global main_loop
     try:
         update_json = request.get_json(force=True)
-        if update_json:
-            update = Update.de_json(update_json, application.bot)
-            # اینجا مستقیم به loop اصلی می‌فرستیم
-            future = asyncio.run_coroutine_threadsafe(
-                application.process_update(update),
-                asyncio.get_running_loop()   # <--- این خط خیلی مهمه!
-            )
-            # اختیاری: می‌تونی future.exception() بگیری برای لاگ
+        if not update_json:
+            return 'No JSON received', 400
+
+        update = Update.de_json(update_json, application.bot)
+        
+        if main_loop is None:
+            logger.error("main_loop هنوز آماده نیست!")
+            return 'Loop not ready', 503
+
+        # ارسال آپدیت به loop اصلی (همان loop ای که application داره)
+        asyncio.run_coroutine_threadsafe(
+            application.process_update(update),
+            main_loop
+        )
+        
         return 'OK', 200
+
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         return 'Error', 500
 
+
+# یه route ساده برای تست زنده بودن سرور
+@flask_app.route('/')
+def index():
+    return "ربات فعاله و وب‌هوک درست کار می‌کنه! 🚀", 200
+
+
+@flask_app.route('/health')
+def health_check():
+    try:
+        r.ping()
+        return "OK - Redis Connected", 200
+    except:
+        return "Redis Down", 500
+
 def run_flask():
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)), use_reloader=False)
+    """اجرای Flask در ترد جدا، اما با دسترسی به همان loop اصلی"""
+    global main_loop
+    
+    # صبر می‌کنیم تا main_loop مقدار بگیرد (حداکثر 10 ثانیه)
+    import time
+    timeout = 10
+    start_time = time.time()
+    while main_loop is None and time.time() - start_time < timeout:
+        time.sleep(0.1)
+    
+    if main_loop is None:
+        logger.error("main_loop هیچوقت مقدار نگرفت! Flask اجرا نمیشه.")
+        return
+    
+    # حالا از همان loop اصلی استفاده می‌کنیم
+    asyncio.set_event_loop(main_loop)
+    
+    flask_app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        use_reloader=False,
+        threaded=True
+    )
 
 # --- اجرای اصلی ---
 async def main():
-    global application
-    application = Application.builder().token(TOKEN).build()
+    global application, main_loop
+    
+    # خیلی مهم: اول از همه loop اصلی رو می‌گیریم و ذخیره می‌کنیم
+    main_loop = asyncio.get_running_loop()
+    logger.info("main_loop با موفقیت گرفته شد")
 
-    # تمام هندلرها (همون قبلی)
+    application = Application.builder().token(TOKEN).concurrent_updates(True).build()
+
+    # تمام هندلرها (همون قبلی‌ها رو داری، فقط اینا رو اضافه/تغییر بده)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("menu", menu))
     application.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
@@ -636,21 +688,26 @@ async def main():
     await application.bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook تنظیم شد: {WEBHOOK_URL}")
 
-    # Flask رو در ترد جدا اجرا کن
+    # اجرای Flask در ترد جدا
     Thread(target=run_flask, daemon=True).start()
+    logger.info("Flask server در ترد جدا شروع شد")
 
-    # چک قیمت هر 60 ثانیه
+    # چک قیمت هر ۶۰ ثانیه
     application.job_queue.run_repeating(
         callback=safe_check_prices,
         interval=60,
         first=10
     )
+    logger.info("چک قیمت هر ۶۰ ثانیه فعال شد")
 
-    logger.info("ربات کاملاً فعال شد و در حال اجراست!")
+    logger.info("ربات کاملاً فعال شد و منتظر پیام‌هاست!")
+
+    # نگه داشتن loop اصلی زنده (برای همیشه)
     while True:
-        await asyncio.sleep(3600)  # نگه داشتن loop اصلی
+        await asyncio.sleep(3600)
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
