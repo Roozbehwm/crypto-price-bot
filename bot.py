@@ -575,7 +575,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Flask App ---
 flask_app = Flask(__name__)
-main_loop = None
 
 @flask_app.route('/health', methods=['GET'])
 def health_check():
@@ -588,9 +587,11 @@ def health_check():
 @flask_app.route(f'/{TOKEN}', methods=['POST'])
 def telegram_webhook():
     try:
-        update = Update.de_json(json.loads(request.get_data(as_text=True)), application.bot)
-        future = run_coroutine_threadsafe(application.process_update(update), main_loop)
-        future.result(timeout=15)
+        update_json = request.get_json(force=True)  # بهتر از get_data(as_text=True)
+        if update_json:
+            update = Update.de_json(update_json, application.bot)
+            # فقط می‌ریزیم توی loop، منتظر نمی‌مونیم
+            asyncio.run_coroutine_threadsafe(application.process_update(update), main_loop)
         return 'OK', 200
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
@@ -600,14 +601,14 @@ def run_flask():
     global main_loop
     main_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(main_loop)
-    flask_app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)), use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
 
 # --- اجرای اصلی ---
 async def main():
     global application
     application = Application.builder().token(TOKEN).build()
 
-    # هندلرها
+    # تمام هندلرها (همون قبلی)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("menu", menu))
     application.add_handler(CallbackQueryHandler(add_coin_menu, pattern='^add_coin$'))
@@ -632,19 +633,20 @@ async def main():
     await application.bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook تنظیم شد: {WEBHOOK_URL}")
 
-    # راه‌اندازی Flask در ترد جدا
+    # Flask رو در ترد جدا اجرا کن
     threading.Thread(target=run_flask, daemon=True).start()
 
-    # راه‌اندازی چک‌کننده قیمت
+    # چک قیمت هر 60 ثانیه
     application.job_queue.run_repeating(
         callback=safe_check_prices,
         interval=60,
         first=10
     )
 
-    logger.info("ربات کاملاً فعال شد!")
+    logger.info("ربات کاملاً فعال شد و در حال اجراست!")
     while True:
-        await asyncio.sleep(3600)
+        await asyncio.sleep(3600)  # نگه داشتن loop اصلی
 
 if __name__ == '__main__':
     asyncio.run(main())
+
