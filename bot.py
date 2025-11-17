@@ -6,6 +6,8 @@ import asyncio
 import requests
 import redis
 import threading
+import asyncio
+from threading import Thread
 from asyncio import run_coroutine_threadsafe
 from flask import Flask, request
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -587,21 +589,22 @@ def health_check():
 @flask_app.route(f'/{TOKEN}', methods=['POST'])
 def telegram_webhook():
     try:
-        update_json = request.get_json(force=True)  # بهتر از get_data(as_text=True)
+        update_json = request.get_json(force=True)
         if update_json:
             update = Update.de_json(update_json, application.bot)
-            # فقط می‌ریزیم توی loop، منتظر نمی‌مونیم
-            asyncio.run_coroutine_threadsafe(application.process_update(update), main_loop)
+            # اینجا مستقیم به loop اصلی می‌فرستیم
+            future = asyncio.run_coroutine_threadsafe(
+                application.process_update(update),
+                asyncio.get_running_loop()   # <--- این خط خیلی مهمه!
+            )
+            # اختیاری: می‌تونی future.exception() بگیری برای لاگ
         return 'OK', 200
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         return 'Error', 500
 
 def run_flask():
-    global main_loop
-    main_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(main_loop)
-    flask_app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)), use_reloader=False)
 
 # --- اجرای اصلی ---
 async def main():
@@ -634,7 +637,7 @@ async def main():
     logger.info(f"Webhook تنظیم شد: {WEBHOOK_URL}")
 
     # Flask رو در ترد جدا اجرا کن
-    threading.Thread(target=run_flask, daemon=True).start()
+    Thread(target=run_flask, daemon=True).start()
 
     # چک قیمت هر 60 ثانیه
     application.job_queue.run_repeating(
@@ -649,4 +652,5 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
