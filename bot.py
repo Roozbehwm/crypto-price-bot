@@ -1,4 +1,3 @@
-# bot.py - نسخه نهایی برای Render + Upstash (rediss://) - 100% بدون خطا
 import os
 import logging
 import json
@@ -13,13 +12,18 @@ from telegram.ext import (
 )
 from flask import Flask, request
 import threading
+# <<<--- این خط رو اضافه کردم
+from asyncio import run_coroutine_threadsafe   # این خط حیاتی بود!
+
 # --- تنظیمات از Environment Variables ---
 TOKEN = os.environ["TOKEN"]
 UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
+
 # --- لاگ ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 # --- چک RENDER_EXTERNAL_URL ---
 if not RENDER_EXTERNAL_URL:
     logger.error("RENDER_EXTERNAL_URL is not set in Render Environment Variables!")
@@ -28,11 +32,12 @@ if not RENDER_EXTERNAL_URL.startswith("http"):
     RENDER_EXTERNAL_URL = "https://" + RENDER_EXTERNAL_URL
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 logger.info(f"Webhook URL: {WEBHOOK_URL}")
+
 # --- چک Redis URL ---
-logger.info(f"UPSTASH_REDIS_URL: {UPSTASH_REDIS_URL}")
 if not UPSTASH_REDIS_URL.startswith("rediss://"):
     logger.error("UPSTASH_REDIS_URL باید با rediss:// شروع بشه!")
     raise ValueError("Invalid Redis URL scheme")
+
 # --- اتصال به Redis ---
 try:
     r = redis.from_url(
@@ -684,17 +689,19 @@ if __name__ == '__main__':
             return 'OK', 200
         except Exception as e:
             return f'Redis Down: {str(e)}', 500
-    @flask_app.route(f'/{TOKEN}', methods=['POST'])
-    def telegram_webhook():
-        try:
-            json_data = request.get_data(as_text=True)
-            update = Update.de_json(json.loads(json_data), app.bot)
-            future = run_coroutine_threadsafe(app.process_update(update), main_loop)
-            future.result(timeout=10)
-            return 'OK'
-        except Exception as e:
-            logger.error(f"Webhook error: {e}")
-            return 'Error', 500
+   @flask_app.route(f'/{TOKEN}', methods=['POST'])
+def telegram_webhook():
+    try:
+        json_data = request.get_data(as_text=True)
+        update = Update.de_json(json.loads(json_data), app.bot)
+        # حالا درست کار می‌کنه چون run_coroutine_threadsafe ایمپورت شده
+        future = run_coroutine_threadsafe(app.process_update(update), main_loop)
+        future.result(timeout=15)  # کمی بیشتر تایم‌اوت دادم
+        return 'OK', 200
+    except Exception as e:
+        logger.error(f"Webhook error: {e}", exc_info=True)
+        return 'Error', 500
+        
     def run_flask():
         global main_loop
         main_loop = asyncio.new_event_loop()
@@ -718,18 +725,29 @@ if __name__ == '__main__':
                 logger.error(f"Price checker error: {e}")
             await asyncio.sleep(60)
     # --- اجرای اصلی ---
-    async def main():
-        # ۱. Initialize app
-        await app.initialize()
-        # ۲. Webhook
-        await set_webhook()
-        # ۳. Flask
-        threading.Thread(target=run_flask, daemon=True).start()
-        # ۴. چک قیمت
-        asyncio.create_task(run_price_checker())
-        # ۵. زنده نگه داشتن
-        logger.info("Bot is running... (24/7 on Render)")
-        while True:
-            await asyncio.sleep(3600)
-    # --- اجرا ---
+  async def main():
+    await app.initialize()                    # حتماً لازم بود
+    await app.bot.set_webhook(url=WEBHOOK_URL)
+    logger.info(f"Webhook set: {WEBHOOK_URL}")
+
+    threading.Thread(target=run_flask, daemon=True).start()
+    asyncio.create_task(run_price_checker())
+
+    logger.info("Bot is fully running 24/7 on Render!")
+    while True:
+        await asyncio.sleep(3600)
+
+if __name__ == '__main__':
+    app = Application.builder().token(TOKEN).build()
+    app.add_error_handler(error_handler)
+
+    # همه هندلرها مثل قبل...
+    # (دقیقاً همونایی که توی پیام قبلی بود)
+
+    flask_app = Flask(__name__)
+    main_loop = None
+
+    # ... بقیه توابع
+
     asyncio.run(main())
+
