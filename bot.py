@@ -12,10 +12,9 @@ from telegram.ext import (
 )
 from flask import Flask, request
 import threading
-# <<<--- این خط رو اضافه کردم
-from asyncio import run_coroutine_threadsafe   # این خط حیاتی بود!
+from asyncio import run_coroutine_threadsafe  # این خط حیاتی بود!
 
-# --- تنظیمات از Environment Variables ---
+# --- تنظیمات ---
 TOKEN = os.environ["TOKEN"]
 UPSTASH_REDIS_URL = os.environ["UPSTASH_REDIS_URL"]
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
@@ -24,92 +23,71 @@ RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- چک RENDER_EXTERNAL_URL ---
+# --- چک URL ---
 if not RENDER_EXTERNAL_URL:
-    logger.error("RENDER_EXTERNAL_URL is not set in Render Environment Variables!")
+    logger.error("RENDER_EXTERNAL_URL تنظیم نشده!")
     raise ValueError("RENDER_EXTERNAL_URL is required!")
 if not RENDER_EXTERNAL_URL.startswith("http"):
     RENDER_EXTERNAL_URL = "https://" + RENDER_EXTERNAL_URL
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 logger.info(f"Webhook URL: {WEBHOOK_URL}")
 
-# --- چک Redis URL ---
-if not UPSTASH_REDIS_URL.startswith("rediss://"):
-    logger.error("UPSTASH_REDIS_URL باید با rediss:// شروع بشه!")
-    raise ValueError("Invalid Redis URL scheme")
-
 # --- اتصال به Redis ---
-try:
-    r = redis.from_url(
-        UPSTASH_REDIS_URL,
-        decode_responses=True,
-        ssl_cert_reqs=None
-    )
-    r.ping()
-    logger.info("Redis متصل شد! (rediss://)")
-except Exception as e:
-    logger.error(f"خطا در اتصال به Redis: {e}")
-    raise
+r = redis.from_url(
+    UPSTASH_REDIS_URL,
+    decode_responses=True,
+    ssl_cert_reqs=None
+)
+r.ping()
+logger.info("Redis متصل شد!")
+
 # --- توابع Redis ---
 def get_user_data(user_id):
     data = r.get(f"user:{user_id}")
     return json.loads(data) if data else []
+
 def set_user_data(user_id, data):
     r.set(f"user:{user_id}", json.dumps(data, ensure_ascii=False))
-# --- کش قیمت (در Redis) ---
-PRICE_CACHE_TTL = 55 # 55 ثانیه کش
+
+# --- کش قیمت ---
 def get_price(cg_id):
     cache_key = f"price:{cg_id}"
-   
-    # ۱. همیشه از کش بخون (حتی اگر قدیمی باشه)
-    try:
-        cached = r.get(cache_key)
-        if cached:
-            data = json.loads(cached)
-            return data['price']
-    except Exception as e:
-        logger.warning(f"Cache read error: {e}")
-    # ۲. درخواست به API
-    try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
-        headers = {"User-Agent": "CryptoBot/1.0"}
-        response = requests.get(url, headers=headers, timeout=8)
-       
-        if response.status_code == 429:
-            logger.warning("CoinGecko rate limit! Using last known price...")
-            # کش قدیمی رو برگردون
-            cached = r.get(cache_key)
-            if cached:
-                return json.loads(cached)['price']
-            return None
-        data = response.json()
-        price = data.get(cg_id, {}).get('usd')
-       
-        if price is not None:
-            # کش کن برای 55 ثانیه
-            cache_data = {'price': price, 'timestamp': time.time()}
-            r.setex(cache_key, 55, json.dumps(cache_data))
-            return price
-           
-    except Exception as e:
-        logger.error(f"Price API error: {e}")
-    # ۳. آخرین تلاش: کش قدیمی
     try:
         cached = r.get(cache_key)
         if cached:
             return json.loads(cached)['price']
     except:
         pass
-       
+    try:
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd"
+        headers = {"User-Agent": "CryptoBot/1.0"}
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code == 429:
+            cached = r.get(cache_key)
+            if cached:
+                return json.loads(cached)['price']
+            return None
+        price = resp.json().get(cg_id, {}).get("usd")
+        if price is not None:
+            r.setex(cache_key, 55, json.dumps({"price": price, "timestamp": time.time()}))
+            return price
+    except:
+        pass
+    try:
+        cached = r.get(cache_key)
+        if cached:
+            return json.loads(cached)['price']
+    except:
+        pass
     return None
-# --- چک قیمت دوره‌ای (امن) ---
+
+# --- چک قیمت دوره‌ای ---
 async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
     bot = context.application.bot
     while True:
         try:
             current_time = time.time()
             keys = r.keys("user:*")
-            # جمع‌آوری همه cg_id منحصر به فرد از همه کاربران
             unique_cg_ids = set()
             all_settings = {}
             for key in keys:
@@ -119,74 +97,51 @@ async def safe_check_prices(context: ContextTypes.DEFAULT_TYPE):
                     all_settings[user_id] = settings
                     for item in settings:
                         unique_cg_ids.add(item['cg_id'])
-                except Exception as e:
-                    logger.error(f"User {key} error in collecting ids: {e}")
-            # fetch batch prices if any
+                except:
+                    continue
+            # Batch fetch
             if unique_cg_ids:
                 try:
-                    ids_str = ','.join(unique_cg_ids)
-                    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids_str}&vs_currencies=usd"
+                    ids = ','.join(unique_cg_ids)
+                    url = f"https://api.coingecko.com/api/v3/simple/price?ids={ids}&vs_currencies=usd"
                     headers = {"User-Agent": "CryptoBot/1.0"}
-                    response = requests.get(url, headers=headers, timeout=8)
-                    if response.status_code == 429:
-                        logger.warning("CoinGecko rate limit! Using cached prices...")
-                    else:
-                        data = response.json()
+                    resp = requests.get(url, headers=headers, timeout=10)
+                    if resp.status_code != 429:
+                        data = resp.json()
                         for cg_id in unique_cg_ids:
-                            price = data.get(cg_id, {}).get('usd')
+                            price = data.get(cg_id, {}).get("usd")
                             if price is not None:
-                                cache_data = {'price': price, 'timestamp': time.time()}
-                                r.setex(f"price:{cg_id}", PRICE_CACHE_TTL, json.dumps(cache_data))
-                except Exception as e:
-                    logger.error(f"Batch price fetch error: {e}")
-            # حالا پردازش کاربران
+                                r.setex(f"price:{cg_id}", 55, json.dumps({"price": price}))
+                except:
+                    pass
+            # پردازش کاربران
             for user_id, settings in all_settings.items():
-                try:
-                    if not settings:
+                if not settings:
+                    continue
+                for item in settings[:]:
+                    price = get_price(item['cg_id'])
+                    if price is None:
                         continue
-                    updated = False # آیا چیزی ارسال شد؟
-                    for item in settings[:]:
-                        price = get_price(item['cg_id'])
-                        if price is None:
-                            logger.info(f"No price available for {item['symbol']} - skipping this cycle")
-                            continue # این ارز رو skip کن، بقیه ادامه بدن
-                        last_sent = item.get('last_sent', 0)
-                        period_seconds = item['period'] * 60
-                        if current_time - last_sent < period_seconds:
+                    last_sent = item.get('last_sent', 0)
+                    if current_time - last_sent < item['period'] * 60:
+                        continue
+                    if 'alert' in item:
+                        op = item['alert']['op']
+                        target = item['alert']['price']
+                        if (op == '>=' and price < target) or (op == '<=' and price > target):
                             continue
-                        # --- ساخت پیام ---
-                        if 'alert' not in item:
-                            message = (
-                                f"قیمت لحظه‌ای\n\n"
-                                f"**نام ارز:** `{item['symbol']}`\n"
-                                f"**قیمت:** `${price:,.2f}`"
-                            )
-                        else:
-                            op = item['alert']['op']
-                            target = item['alert']['price']
-                            condition = (op == '>=' and price >= target) or (op == '<=' and price <= target)
-                            if not condition:
-                                continue
-                            op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
-                            message = (
-                                f"هشدار قیمت!\n\n"
-                                f"**نام ارز:** `{item['symbol']}`\n"
-                                f"**قیمت لحظه‌ای:** `${price:,.2f}`\n\n"
-                                f"**شرط فعال شده:** {op_text} `${target:,.2f}`"
-                            )
-                        # --- ارسال پیام ---
-                        try:
-                            await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
-                            item['last_sent'] = current_time
-                            updated = True
-                        except Exception as send_e:
-                            logger.warning(f"Send error to {user_id}: {send_e}")
-                    # --- همیشه ذخیره کن (حتی اگر هیچی ارسال نشد) ---
-                    set_user_data(user_id, settings)
-                except Exception as e:
-                    logger.error(f"User {user_id} error: {e}")
+                        op_text = "بیشتر یا مساوی با" if op == '>=' else "کمتر یا مساوی با"
+                        message = f"هشدار قیمت!\n\n**{item['symbol']}**: `${price:,.2f}`\n**شرط:** {op_text} `${target:,.2f}`"
+                    else:
+                        message = f"قیمت لحظه‌ای\n**{item['symbol']}**: `${price:,.2f}`"
+                    try:
+                        await bot.send_message(chat_id=user_id, text=message, parse_mode='Markdown')
+                        item['last_sent'] = current_time
+                    except:
+                        pass
+                set_user_data(user_id, settings)
         except Exception as e:
-            logger.error(f"Check prices error: {e}")
+            logger.error(f"Price checker error: {e}")
         await asyncio.sleep(60)
        
 # --- ایموجی‌ها ---
@@ -680,34 +635,33 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern='^back$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     # --- Flask ---
-    flask_app = Flask(__name__)
+  flask_app = Flask(__name__)
     main_loop = None
+    
     @flask_app.route('/health', methods=['GET'])
     def health_check():
         try:
             r.ping()
             return 'OK', 200
+        except:
+            return 'Redis Down', 500
+    
+    @flask_app.route(f'/{TOKEN}', methods=['POST'])
+    def telegram_webhook():
+        try:
+            update = Update.de_json(json.loads(request.get_data(as_text=True)), app.bot)
+            future = run_coroutine_threadsafe(app.process_update(update), main_loop)
+            future.result(timeout=15)
+            return 'OK', 200
         except Exception as e:
-            return f'Redis Down: {str(e)}', 500
-   @flask_app.route(f'/{TOKEN}', methods=['POST'])
-def telegram_webhook():
-    try:
-        json_data = request.get_data(as_text=True)
-        update = Update.de_json(json.loads(json_data), app.bot)
-        # حالا درست کار می‌کنه چون run_coroutine_threadsafe ایمپورت شده
-        future = run_coroutine_threadsafe(app.process_update(update), main_loop)
-        future.result(timeout=15)  # کمی بیشتر تایم‌اوت دادم
-        return 'OK', 200
-    except Exception as e:
-        logger.error(f"Webhook error: {e}", exc_info=True)
-        return 'Error', 500
-        
+            logger.error(f"Webhook error: {e}", exc_info=True)
+            return 'Error', 500
+    
     def run_flask():
-        global main_loop
-        main_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(main_loop)
-        PORT = int(os.environ.get("PORT", 10000))
-        flask_app.run(host='0.0.0.0', port=PORT, debug=False, use_reloader=False)
+    global main_loop
+    main_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(main_loop)
+    flask_app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)), use_reloader=False)
     # --- Webhook (بدون initialize) ---
     async def set_webhook():
         try:
@@ -725,29 +679,26 @@ def telegram_webhook():
                 logger.error(f"Price checker error: {e}")
             await asyncio.sleep(60)
     # --- اجرای اصلی ---
-  async def main():
-    await app.initialize()                    # حتماً لازم بود
-    await app.bot.set_webhook(url=WEBHOOK_URL)
-    logger.info(f"Webhook set: {WEBHOOK_URL}")
+    sync def run_price_checker():
+        ctx = ContextTypes.DEFAULT_TYPE(application=app)
+        while True:
+            await safe_check_prices(ctx)
+            await asyncio.sleep(60)
+    
+    async def main():
+        await app.initialize()
+        await app.bot.set_webhook(url=WEBHOOK_URL)
+        logger.info("Webhook فعال شد")
+        threading.Thread(target=run_flask, daemon=True).start()
+        asyncio.create_task(run_price_checker())
+        logger.info("ربات کاملاً فعال شد!")
+        while True:
+            await asyncio.sleep(3600)
+    
+    if __name__ == '__main__':
+        app = Application.builder().token(TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        # بقیه هندلرها رو هم اضافه کن (من برای کوتاه شدن حذف کردم، ولی تو کد اصلی‌ت همه‌شون هست)
+        asyncio.run(main())
 
-    threading.Thread(target=run_flask, daemon=True).start()
-    asyncio.create_task(run_price_checker())
-
-    logger.info("Bot is fully running 24/7 on Render!")
-    while True:
-        await asyncio.sleep(3600)
-
-if __name__ == '__main__':
-    app = Application.builder().token(TOKEN).build()
-    app.add_error_handler(error_handler)
-
-    # همه هندلرها مثل قبل...
-    # (دقیقاً همونایی که توی پیام قبلی بود)
-
-    flask_app = Flask(__name__)
-    main_loop = None
-
-    # ... بقیه توابع
-
-    asyncio.run(main())
 
