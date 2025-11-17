@@ -579,13 +579,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 # --- Flask App ---
 flask_app = Flask(__name__)
 
+
+# --- Flask Routes ---
+@flask_app.route('/')
+def index():
+    return "ربات فعاله و وب‌هوک درست کار می‌کنه! 🚀", 200
+
 @flask_app.route('/health', methods=['GET'])
 def health_check():
     try:
         r.ping()
-        return 'OK', 200
-    except:
-        return 'Redis Down', 500
+        return "OK - Redis Connected - Bot Running!", 200
+    except Exception as e:
+        return f"Redis Error: {e}", 500
 
 @flask_app.route(f'/{TOKEN}', methods=['POST'])
 def telegram_webhook():
@@ -601,7 +607,7 @@ def telegram_webhook():
             logger.error("main_loop هنوز آماده نیست!")
             return 'Loop not ready', 503
 
-        # ارسال آپدیت به loop اصلی (همان loop ای که application داره)
+        # ارسال آپدیت به loop اصلی
         asyncio.run_coroutine_threadsafe(
             application.process_update(update),
             main_loop
@@ -612,21 +618,6 @@ def telegram_webhook():
     except Exception as e:
         logger.error(f"Webhook error: {e}", exc_info=True)
         return 'Error', 500
-
-
-# یه route ساده برای تست زنده بودن سرور
-@flask_app.route('/')
-def index():
-    return "ربات فعاله و وب‌هوک درست کار می‌کنه! 🚀", 200
-
-
-@flask_app.route('/health')
-def health_check():
-    try:
-        r.ping()
-        return "OK - Redis Connected", 200
-    except:
-        return "Redis Down", 500
 
 def run_flask():
     """اجرای Flask در ترد جدا، اما با دسترسی به همان loop اصلی"""
@@ -708,6 +699,7 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
 
 
 
